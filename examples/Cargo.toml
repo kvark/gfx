@@ -7,14 +7,15 @@ workspace = ".."
 [features]
 default = ["gl"]
 mint = ["gfx/mint", "gfx_core/mint"]
-metal = ["gfx_backend_metal"]
-metal_argument_buffer = ["gfx_backend_metal/argument_buffer"]
-gl = ["gfx_backend_gl"]
+metal = ["gfx_device_metal", "gfx_window_metal"]
+#metal_argument_buffer = ["gfx_device_metalll/argument_buffer"]
+gl = ["gfx_device_gl", "gfx_window_glutin"]
 dx11 = ["gfx_device_dx11", "gfx_window_dxgi"]
 dx12 = ["gfx_device_dx12", "gfx_window_dxgi"]
-vulkan = ["gfx_backend_vulkan"]
-#sdl = ["gfx_window_sdl"]
+vulkan = ["gfx_device_vulkan"]
+sdl = ["gfx_window_sdl"]
 serialize = ["gfx/serialize", "gfx_core/serialize"]
+headless = ["gfx_window_glutin/headless"]
 unstable = []
 
 [dependencies]
@@ -31,30 +32,41 @@ noise = "0.4"
 image = "0.15"
 
 gfx = { path = "../src/render", version = "0.16" }
-gfx_core = { path = "../src/core", version = "0.10" }
+gfx_core = { path = "../src/core", version = "0.7.1" }
 gfx_support = { path = "../src/support", version = "0.7" }
 
-[dependencies.gfx_backend_gl]
-path = "../src/backend/gl"
-version = "0.1"
-optional = true
+gfx_device_gl = { path = "../src/backend/gl", version = "0.14", optional = true }
+gfx_window_glutin = { path = "../src/window/glutin", version = "0.17", optional = true }
 
-[dependencies.gfx_backend_vulkan]
+[dependencies.gfx_device_vulkan]
 path = "../src/backend/vulkan"
-version = "0.1"
+version = "0.2"
 optional = true
 
-#[dependencies.gfx_window_sdl]
-#path = "../src/window/sdl"
-#version = "0.7"
+[dependencies.gfx_device_metal]
+path = "../src/backend/metal"
+version = "0.3"
+optional = true
+
+[dependencies.gfx_window_metal]
+path = "../src/window/metal"
+version = "0.4"
+optional = true
+
+#[dependencies.gfx_device_metalll]
+#path = "../src/backend/metalll"
+#version = "0.2"
 #optional = true
+#features = ["native_fence"]
+
+[dependencies.gfx_window_sdl]
+path = "../src/window/sdl"
+version = "0.7"
+optional = true
 
 [target.'cfg(unix)'.dependencies]
-#gfx_window_glfw = { path = "../src/window/glfw", version = "0.15" }
-#gfx_window_sdl = { path = "../src/window/sdl", version = "0.7" }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-gfx_backend_metal = { path = "../src/backend/metal", version = "0.1", optional = true }
+gfx_window_glfw = { path = "../src/window/glfw", version = "0.15" }
+gfx_window_sdl = { path = "../src/window/sdl", version = "0.7" }
 
 [target.'cfg(windows)'.dependencies]
 gfx_device_dx11 = { path = "../src/backend/dx11", version = "0.6", optional = true }
