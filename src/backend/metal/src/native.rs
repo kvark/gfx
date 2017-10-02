@@ -11,7 +11,8 @@ use cocoa::foundation::{NSRange, NSUInteger};
 use metal::*;
 use objc;
 
-pub struct QueueFamily {}
+pub struct QueueFamily {
+}
 
 #[derive(Debug)]
 pub struct ShaderModule(pub MTLLibrary);
@@ -21,16 +22,15 @@ unsafe impl Sync for ShaderModule {}
 
 #[derive(Debug)]
 pub struct RenderPass {
-    pub(crate) desc: MTLRenderPassDescriptor,
-    pub(crate) attachments: Vec<pass::Attachment>,
-    pub(crate) num_colors: usize,
+    pub desc: MTLRenderPassDescriptor,
+    pub attachments: Vec<pass::Attachment>,
 }
 
 unsafe impl Send for RenderPass {}
 unsafe impl Sync for RenderPass {}
 
 #[derive(Debug)]
-pub struct FrameBuffer(pub(crate) MTLRenderPassDescriptor);
+pub struct FrameBuffer(pub MTLRenderPassDescriptor);
 
 unsafe impl Send for FrameBuffer {}
 unsafe impl Sync for FrameBuffer {}
@@ -51,34 +51,49 @@ unsafe impl Sync for GraphicsPipeline {}
 pub struct ComputePipeline {}
 
 #[derive(Debug)]
-pub struct Image(pub(crate) MTLTexture);
+pub struct Image(pub MTLTexture);
 
 unsafe impl Send for Image {}
 unsafe impl Sync for Image {}
 
 #[derive(Debug)]
-pub struct BufferView {}
+pub struct ConstantBufferView {}
 
 #[derive(Debug)]
-pub struct ImageView(pub(crate) MTLTexture);
+pub struct ShaderResourceView(pub MTLTexture);
 
-unsafe impl Send for ImageView {}
-unsafe impl Sync for ImageView {}
+unsafe impl Send for ShaderResourceView {}
+unsafe impl Sync for ShaderResourceView {}
 
 #[derive(Debug)]
-pub struct Sampler(pub(crate) MTLSamplerState);
+pub struct UnorderedAccessView {}
+
+#[derive(Debug)]
+pub struct RenderTargetView(pub MTLTexture);
+
+unsafe impl Send for RenderTargetView {}
+unsafe impl Sync for RenderTargetView {}
+
+#[derive(Debug)]
+pub struct DepthStencilView(pub MTLTexture);
+
+unsafe impl Send for DepthStencilView {}
+unsafe impl Sync for DepthStencilView {}
+
+#[derive(Debug)]
+pub struct Sampler(pub MTLSamplerState);
 
 unsafe impl Send for Sampler {}
 unsafe impl Sync for Sampler {}
 
 #[derive(Debug)]
-pub struct Semaphore(pub(crate) *mut c_void);
+pub struct Semaphore(pub *mut c_void);
 
 unsafe impl Send for Semaphore {}
 unsafe impl Sync for Semaphore {}
 
 #[derive(Debug)]
-pub struct Buffer(pub(crate) MTLBuffer);
+pub struct Buffer(pub MTLBuffer);
 
 unsafe impl Send for Buffer {}
 unsafe impl Sync for Buffer {}
@@ -87,9 +102,9 @@ unsafe impl Sync for Buffer {}
 #[cfg(feature = "argument_buffer")]
 #[derive(Debug)]
 pub struct DescriptorPool {
-    pub(crate) arg_buffer: MTLBuffer,
-    pub(crate) total_size: NSUInteger,
-    pub(crate) offset: NSUInteger,
+    pub arg_buffer: MTLBuffer,
+    pub total_size: NSUInteger,
+    pub offset: NSUInteger,
 }
 #[cfg(feature = "argument_buffer")]
 unsafe impl Send for DescriptorPool {}
@@ -150,8 +165,8 @@ impl core::DescriptorPool<Backend> for DescriptorPool {
 #[cfg(feature = "argument_buffer")]
 #[derive(Debug)]
 pub struct DescriptorSetLayout {
-    pub(crate) encoder: MTLArgumentEncoder,
-    pub(crate) stage_flags: pso::ShaderStageFlags,
+    pub encoder: MTLArgumentEncoder,
+    pub stage_flags: pso::ShaderStageFlags,
 }
 #[cfg(feature = "argument_buffer")]
 unsafe impl Send for DescriptorSetLayout {}
@@ -161,16 +176,16 @@ unsafe impl Sync for DescriptorSetLayout {}
 #[cfg(not(feature = "argument_buffer"))]
 #[derive(Debug)]
 pub struct DescriptorSetLayout {
-    pub(crate) bindings: Vec<pso::DescriptorSetLayoutBinding>,
+    pub bindings: Vec<pso::DescriptorSetLayoutBinding>,
 }
 
 #[derive(Clone, Debug)]
 #[cfg(feature = "argument_buffer")]
 pub struct DescriptorSet {
-    pub(crate) buffer: MTLBuffer,
-    pub(crate) offset: NSUInteger,
-    pub(crate) encoder: MTLArgumentEncoder,
-    pub(crate) stage_flags: pso::ShaderStageFlags,
+    pub buffer: MTLBuffer,
+    pub offset: NSUInteger,
+    pub encoder: MTLArgumentEncoder,
+    pub stage_flags: pso::ShaderStageFlags,
 }
 #[cfg(feature = "argument_buffer")]
 unsafe impl Send for DescriptorSet {}
@@ -180,14 +195,14 @@ unsafe impl Sync for DescriptorSet {}
 #[derive(Clone, Debug)]
 #[cfg(not(feature = "argument_buffer"))]
 pub struct DescriptorSet {
-    pub(crate) inner: Arc<Mutex<DescriptorSetInner>>,
+    pub inner: Arc<Mutex<DescriptorSetInner>>,
 }
 
 #[cfg(not(feature = "argument_buffer"))]
 #[derive(Debug)]
 pub struct DescriptorSetInner {
-    pub(crate) layout: Vec<pso::DescriptorSetLayoutBinding>, // TODO: maybe don't clone?
-    pub(crate) bindings: HashMap<usize, DescriptorSetBinding>,
+    pub layout: Vec<pso::DescriptorSetLayoutBinding>, // TODO: maybe don't clone?
+    pub bindings: HashMap<usize, DescriptorSetBinding>,
 }
 #[cfg(not(feature = "argument_buffer"))]
 unsafe impl Send for DescriptorSetInner {}
@@ -239,17 +254,21 @@ pub enum Memory {
 
 #[derive(Debug)]
 pub struct UnboundBuffer {
-    pub(crate) size: u64,
+    pub size: u64,
 }
 
-unsafe impl Send for UnboundBuffer {}
-unsafe impl Sync for UnboundBuffer {}
+unsafe impl Send for UnboundBuffer {
+}
+unsafe impl Sync for UnboundBuffer {
+}
 
 #[derive(Debug)]
 pub struct UnboundImage(pub MTLTextureDescriptor);
 
-unsafe impl Send for UnboundImage {}
-unsafe impl Sync for UnboundImage {}
+unsafe impl Send for UnboundImage {
+}
+unsafe impl Sync for UnboundImage {
+}
 
 #[derive(Debug)]
 pub struct Fence(pub Arc<Mutex<bool>>);
@@ -266,7 +285,7 @@ pub unsafe fn objc_err_description(object: *mut objc::runtime::Object) -> String
     let utf8_bytes: NSUInteger = msg_send![description, lengthOfBytesUsingEncoding: 4 as NSUInteger];
     let mut bytes = Vec::with_capacity(utf8_bytes as usize);
     bytes.set_len(utf8_bytes as usize);
-    let success: objc::runtime::BOOL = msg_send![description,
+    let success: objc::runtime::BOOL = msg_send![description, 
         getBytes: bytes.as_mut_ptr()
         maxLength: utf8_bytes
         usedLength: ptr::null_mut::<NSUInteger>()
@@ -300,3 +319,5 @@ extern "C" {
         object: *mut c_void,
     );
 }
+
+pub const kCVPixelFormatType_32RGBA: u32 = (b'R' as u32) << 24 | (b'G' as u32) << 16 | (b'B' as u32) << 8 | b'A' as u32;

@@ -28,15 +28,9 @@ gfx-rs is a graphics abstraction library in Rust. It consists of the following l
 - `gfx_backend_*`: graphics backends for various platforms, include the windowing logic.
 - `gfx_render`: higher level wrapper around HAL, providing resources lifetime tracking, synchronization, and more
 
-The current `master` branch is heavy WIP, please refer to [pre-ll](https://github.com/gfx-rs/gfx/tree/pre-ll) for the latest stable code/examples. It also has a more complete README ;)
-
 ### Features
 
-Native API backends:
-- [Vulkan](src/backend/vulkan)
-- [Direct3D 12](src/backend/dx12)
-- [Metal](src/backend/metal)
-- (WIP) [OpenGL 2.1+/ES2+](src/backend/gl)
+TODO
 
 ### Usage
 
