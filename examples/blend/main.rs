@@ -52,15 +52,17 @@ impl Vertex {
 }
 
 fn load_texture<R, F>(factory: &mut F, data: &[u8])
-                -> Result<gfx::handle::ShaderResourceView<R, [f32; 4]>, String> where
-                R: gfx::Resources, F: gfx::Factory<R> {
+                -> Result<(gfx::handle::Texture<R, gfx::format::R8_G8_B8_A8>,
+                           gfx::handle::ShaderResourceView<R, [f32; 4]>),
+                          String>
+where R: gfx::Resources, F: gfx::Factory<R> {
     use std::io::Cursor;
     use gfx::texture as t;
     let img = image::load(Cursor::new(data), image::PNG).unwrap().to_rgba();
     let (width, height) = img.dimensions();
     let kind = t::Kind::D2(width as t::Size, height as t::Size, t::AaMode::Single);
-    let (_, view) = factory.create_texture_immutable_u8::<Rgba8>(kind, t::Mipmap::Provided, &[&img]).unwrap();
-    Ok(view)
+    let result = factory.create_texture_immutable_u8::<Rgba8>(kind, t::Mipmap::Provided, &[&img]).unwrap();
+    Ok(result)
 }
 
 const BLENDS: [&'static str; 9] = [
@@ -78,6 +80,8 @@ const BLENDS: [&'static str; 9] = [
 struct App<R: gfx::Resources>{
     bundle: Bundle<R, pipe::Data<R>>,
     id: u8,
+    lena_base: gfx::handle::Texture<R, gfx::format::R8_G8_B8_A8>,
+    tint_base: gfx::handle::Texture<R, gfx::format::R8_G8_B8_A8>,
 }
 
 impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
@@ -110,8 +114,8 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
         ];
         let (vbuf, slice) = factory.create_vertex_buffer_with_slice(&vertex_data, ());
 
-        let lena_texture = load_texture(factory, &include_bytes!("image/lena.png")[..]).unwrap();
-        let tint_texture = load_texture(factory, &include_bytes!("image/tint.png")[..]).unwrap();
+        let (lena_base, lena_texture) = load_texture(factory, &include_bytes!("image/lena.png")[..]).unwrap();
+        let (tint_base, tint_texture) = load_texture(factory, &include_bytes!("image/tint.png")[..]).unwrap();
         let sampler = factory.create_sampler_linear();
 
         let pso = factory.create_pipeline_simple(
@@ -140,14 +144,25 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
         App {
             bundle: Bundle::new(slice, pso, data),
             id: 0,
+            lena_base,
+            tint_base,
         }
     }
 
     fn render<C: gfx::CommandBuffer<R>>(&mut self, encoder: &mut gfx::Encoder<R, C>) {
+        use gfx::memory::Typed;
         self.bundle.data.blend = (self.id as i32).into();
         let locals = Locals { blend: self.id as i32 };
         encoder.update_constant_buffer(&self.bundle.data.locals, &locals);
         encoder.clear(&self.bundle.data.out, [0.0; 4]);
+
+        let src_info = self.tint_base.get_info().to_raw_image_info(gfx::format::ChannelType::Unorm, 0);
+        let dst_info = self.lena_base.get_info().to_raw_image_info(gfx::format::ChannelType::Unorm, 0);
+        encoder.copy_texture_to_texture_raw(
+            self.tint_base.raw(), None, src_info,
+            self.lena_base.raw(), None, dst_info,
+        ).unwrap();
+
         self.bundle.encode(encoder);
     }
 
