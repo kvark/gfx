@@ -18,6 +18,7 @@ use core::{self, texture as tex};
 use command;
 use {Buffer, Texture};
 
+
 fn copy_buffer(context: *mut winapi::ID3D11DeviceContext,
                src: &Buffer, dst: &Buffer,
                src_offset: UINT, dst_offset: UINT,
@@ -36,6 +37,31 @@ fn copy_buffer(context: *mut winapi::ID3D11DeviceContext,
         (*context).CopySubresourceRegion(dst_resource, 0, dst_offset, 0, 0,
                                          src_resource, 0, &src_box)
     };
+}
+
+fn copy_texture(context: *mut winapi::ID3D11DeviceContext,
+                src: &tex::TextureCopyRegion<Texture>,
+                dst: &tex::TextureCopyRegion<Texture>) {
+    assert_eq!((src.info.width, src.info.height, src.info.depth),
+               (dst.info.width, dst.info.height, dst.info.height));
+    assert(!src.kind.is_array() && !dst.kind.is_array());
+
+    let src_resource = src.texture.as_resource();
+    let dst_resource = dst.texture.as_resource();
+    let src_box = winapi::D3D11_BOX {
+        left: src.info.xoffset,
+        right: src.info.xoffset + src.info.width,
+        top: src.info.yoffset,
+        bottom: src.info.yoffset + src.info.height,
+        front: src.info.zoffset,
+        back: src.info.zoffset + src.info.depth,
+    };
+    unsafe {
+        (*context).CopySubresourceRegion(dst_resource, dst.info.mipmap as _,
+                                         dst.info.xoffset, dst.info.yoffset, dst.info.zoffset,
+                                         src_resource, src.info.mipmap as _, &src_box)
+    };
+
 }
 
 pub fn update_buffer(context: *mut winapi::ID3D11DeviceContext, buffer: &Buffer,
@@ -57,30 +83,24 @@ pub fn update_buffer(context: *mut winapi::ID3D11DeviceContext, buffer: &Buffer,
     }
 }
 
-pub fn update_texture(context: *mut winapi::ID3D11DeviceContext, texture: &Texture, kind: tex::Kind,
-                      face: Option<tex::CubeFace>, data: &[u8], image: &tex::RawImageInfo) {
-    let subres = texture_subres(face, image);
-    let dst_resource = texture.as_resource();
-    let (width, height, _, _) = kind.get_level_dimensions(image.mipmap);
-    let stride = image.format.0.get_total_bits() as usize;
-    let row_pitch = width as usize * stride;
-    let depth_pitch = height as usize * row_pitch;
-
-    // DYNAMIC only
-    let offset_bytes = image.xoffset as usize +
-                       image.yoffset as usize * row_pitch +
-                       image.zoffset as usize * depth_pitch;
+pub fn update_texture(context: *mut winapi::ID3D11DeviceContext,
+                      tex: &tex::TextureCopyRegion<Texture>,
+                      data: &[u8]) {
+    let subres = texture_subres(tex.cube_face, &tex.info);
+    let dst_resource = tex.texture.as_resource();
+    // DYNAMIC only; This only works if the whole texture is covered.
+    assert_eq!(tex.info.xoffset + tex.info.yoffset + tex.info.zoffset, 0);
     let map_type = winapi::D3D11_MAP_WRITE_DISCARD;
     let hr = unsafe {
         let mut sub = mem::zeroed();
         let hr = (*context).Map(dst_resource, subres, map_type, 0, &mut sub);
-        let dst = (sub.pData as *mut u8).offset(offset_bytes as isize);
+        let dst = sub.pData as *mut u8;
         ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len());
         (*context).Unmap(dst_resource, 0);
         hr
     };
     if !winapi::SUCCEEDED(hr) {
-        error!("Texture {:?} failed to map, error {:x}", texture, hr);
+        error!("Texture {:?} failed to map, error {:x}", tex.texture, hr);
     }
 }
 
@@ -203,13 +223,16 @@ pub fn process(ctx: *mut winapi::ID3D11DeviceContext, command: &command::Command
         CopyBuffer(ref src, ref dst, src_offset, dst_offset, size) => {
             copy_buffer(ctx, src, dst, src_offset, dst_offset, size);
         },
+        CopyTexture(ref src, ref dst) => {
+            copy_texture(ctx, src, dst);
+        },
         UpdateBuffer(ref buffer, pointer, offset) => {
             let data = data_buf.get(pointer);
             update_buffer(ctx, buffer, data, offset);
         },
-        UpdateTexture(ref tex, kind, face, pointer, ref image) => {
+        UpdateTexture(ref dst, pointer) => {
             let data = data_buf.get(pointer);
-            update_texture(ctx, tex, kind, face, data, image);
+            update_texture(ctx, dst, data);
         },
         GenerateMips(ref srv) => unsafe {
             (*ctx).GenerateMips(srv.0);
