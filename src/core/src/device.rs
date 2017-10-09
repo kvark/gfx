@@ -187,6 +187,11 @@ pub trait Device<B: Backend>: Clone {
     ) -> Result<B::BufferView, buffer::ViewError>;
 
     ///
+    fn create_texel_buffer_view(
+        &mut self, &B::BufferView, format::Format
+    ) -> Result<B::TexelBufferView, buffer::ViewError>;
+
+    ///
     fn create_image(
         &mut self, image::Kind, image::Level, format::Format, image::Usage,
     ) -> Result<B::UnboundImage, image::CreationError>;

@@ -722,6 +722,22 @@ impl d::Device<B> for Device {
         })
     }
 
+    fn create_texel_buffer_view(
+        &mut self, view: &n::BufferView, format: format::Format
+    ) -> Result<B::TexelBufferView, buffer::ViewError> {
+        Ok(n::TexelBufferView { raw: 
+            match self.raw.0.create_buffer_view(vk::BufferViewCreateInfo {
+                s_type: vk::StructureType::BufferViewCreateInfo,
+                p_next: ptr::null(),
+                flags: vk::BufferViewCreateFlags::empty(),
+                buffer: view.buffer,
+                format: conv::map_format(format.0, format.1),
+                offset: view.range.start,
+                range: view.range.end - view.range.start,
+            }).expect("Error on texel buffer view creation") //TODO: Proper error handling
+        })
+    }
+
     fn create_image(&mut self, kind: image::Kind, mip_levels: image::Level, format: format::Format, usage: image::Usage)
          -> Result<UnboundImage, image::CreationError>
     {
@@ -932,7 +948,7 @@ impl d::Device<B> for Device {
     fn update_descriptor_sets(&mut self, writes: &[pso::DescriptorSetWrite<B>]) {
         let mut image_infos = Vec::new();
         let mut buffer_infos = Vec::new();
-        // let mut texel_buffer_views = Vec::new();
+        let mut texel_buffer_views = Vec::new();
 
         for write in writes {
             match write.write {
@@ -949,7 +965,7 @@ impl d::Device<B> for Device {
                 pso::DescriptorWrite::SampledImage(ref images) |
                 pso::DescriptorWrite::StorageImage(ref images) |
                 pso::DescriptorWrite::InputAttachment(ref images) => {
-                    for &(ref view, layout) in images {
+                    for &(view, layout) in images {
                         image_infos.push(vk::DescriptorImageInfo {
                             sampler: vk::Sampler::null(),
                             image_view: view.view,
@@ -958,13 +974,21 @@ impl d::Device<B> for Device {
                     }
                 }
 
-                pso::DescriptorWrite::ConstantBuffer(ref cbvs) => {
-                    for &(ref buffer, ref range) in cbvs {
+                pso::DescriptorWrite::ConstantBuffer(ref buffers) |
+                pso::DescriptorWrite::StorageBuffer(ref buffers) => {
+                    for buffer in buffers {
                         buffer_infos.push(vk::DescriptorBufferInfo {
-                            buffer: buffer.raw,
-                            offset: range.start,
-                            range: range.end - range.start,
+                            buffer: buffer.buffer,
+                            offset: buffer.range.start,
+                            range: buffer.range.end - buffer.range.start,
                         });
+                    }
+                }
+
+                pso::DescriptorWrite::UniformTexelBuffer(ref texel_buffers) |
+                pso::DescriptorWrite::StorageTexelBuffer(ref texel_buffers) => {
+                    for texel_buffer in texel_buffers {
+                        buffer_views.push(texel_buffer.raw)
                     }
                 }
 
@@ -975,8 +999,10 @@ impl d::Device<B> for Device {
         // Track current subslice for each write
         let mut cur_image_index = 0;
         let mut cur_buffer_index = 0;
+        let mut cur_texel_index = 0;
 
         let writes = writes.iter().map(|write| {
+
             let (ty, count, image_info, buffer_info, texel_buffer_view) = match write.write {
                 pso::DescriptorWrite::Sampler(ref samplers) => {
                     let info_ptr = &image_infos[cur_image_index] as *const _;
@@ -999,13 +1025,6 @@ impl d::Device<B> for Device {
                     (vk::DescriptorType::StorageImage, images.len(),
                         info_ptr, ptr::null(), ptr::null())
                 }
-                pso::DescriptorWrite::ConstantBuffer(ref cbvs) => {
-                    let info_ptr = &buffer_infos[cur_buffer_index] as *const _;
-                    cur_buffer_index += cbvs.len();
-
-                    (vk::DescriptorType::UniformBuffer, cbvs.len(),
-                        ptr::null(), info_ptr, ptr::null())
-                }
                 pso::DescriptorWrite::InputAttachment(ref images) => {
                     let info_ptr = &image_infos[cur_image_index] as *const _;
                     cur_image_index += images.len();
@@ -1013,6 +1032,37 @@ impl d::Device<B> for Device {
                     (vk::DescriptorType::InputAttachment, images.len(),
                         info_ptr, ptr::null(), ptr::null())
                 }
+                
+                pso::DescriptorWrite::UniformBuffer(ref buffers) => {
+                    let info_ptr = &buffer_infos[cur_buffer_index] as *const _;
+                    cur_buffer_index += buffers.len();
+
+                    (vk::DescriptorType::UniformBuffer, buffers.len(),
+                        ptr::null(), info_ptr, ptr::null())
+                }
+                pso::DescriptorWrite::StorageBuffer(ref buffers) => {
+                    let info_ptr = &buffer_infos[cur_buffer_index] as *const _;
+                    cur_buffer_index += buffers.len();
+
+                    (vk::DescriptorType::StorageBuffer, buffers.len(),
+                        ptr::null(), info_ptr, ptr::null())
+                }
+
+                pso::DescriptorWrite::UniformTexelBuffer(ref texel_buffers) => {
+                    let info_ptr = &texel_buffer_views[cur_texel_index] as *const _;
+                    cur_texel_index += texel_buffers.len();
+
+                    (vk::DescriptorType::UniformTexelBuffer, texel_buffers.len(),
+                        ptr::null(), ptr::null(), info_ptr)
+                }
+                pso::DescriptorWrite::StorageTexelBuffer(ref texel_buffers) => {
+                    let info_ptr = &texel_buffer_views[cur_texel_index] as *const _;
+                    cur_texel_index += texel_buffers.len();
+
+                    (vk::DescriptorType::StorageTexelBuffer, texel_buffers.len(),
+                        ptr::null(), ptr::null(), info_ptr)
+                }
+                
                 _ => unimplemented!(), // TODO
             };
 
