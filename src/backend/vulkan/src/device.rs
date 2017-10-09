@@ -974,7 +974,7 @@ impl d::Device<B> for Device {
                     }
                 }
 
-                pso::DescriptorWrite::ConstantBuffer(ref buffers) |
+                pso::DescriptorWrite::UniformBuffer(ref buffers) |
                 pso::DescriptorWrite::StorageBuffer(ref buffers) => {
                     for buffer in buffers {
                         buffer_infos.push(vk::DescriptorBufferInfo {
