@@ -93,9 +93,9 @@ pub enum DescriptorWrite<'a, B: Backend> {
     Sampler(Vec<&'a B::Sampler>),
     SampledImage(Vec<(&'a B::ImageView, ImageLayout)>),
     StorageImage(Vec<(&'a B::ImageView, ImageLayout)>),
-    UniformTexelBuffer(Vec<&'a B::BufferView>),
-    StorageTexelBuffer(Vec<&'a B::BufferView>),
-    ConstantBuffer(Vec<&'a B::BufferView>),
-    StorageBuffer, //TODO
     InputAttachment(Vec<(&'a B::ImageView, ImageLayout)>),
+    UniformBuffer(Vec<&'a B::BufferView>),
+    StorageBuffer(Vec<&'a B::BufferView>),
+    UniformTexelBuffer(Vec<&'a B::TexelBufferView>),
+    StorageTexelBuffer(Vec<&'a B::TexelBufferView>),
 }

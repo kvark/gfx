@@ -48,19 +48,25 @@ impl Error for ViewError {
 bitflags!(
     /// Buffer usage flags.
     #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-    pub flags Usage: u16 {
+    pub flags Usage: u32 {
         ///
         const TRANSFER_SRC  = 0x1,
         ///
         const TRANSFER_DST = 0x2,
         ///
-        const CONSTANT = 0x4,
+        const UNIFORM = 0x4,
         ///
-        const INDEX = 0x8,
+        const STORAGE = 0x8,
         ///
-        const INDIRECT = 0x10,
+        const UNIFORM_TEXEL = 0x10,
         ///
-        const VERTEX = 0x20,
+        const STORAGE_TEXEL = 0x20,
+        ///
+        const INDEX = 0x40,
+        ///
+        const INDIRECT = 0x80,
+        ///
+        const VERTEX = 0x100,
     }
 );
 
