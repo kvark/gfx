@@ -715,7 +715,7 @@ impl d::Device<B> for Device {
 
     fn create_texel_buffer_view(
         &mut self, view: &n::BufferView, format: format::Format
-    ) -> Result<B::TexelBufferView, buffer::ViewError> {
+    ) -> Result<n::TexelBufferView, buffer::ViewError> {
         Ok(n::TexelBufferView { raw: 
             match self.raw.0.create_buffer_view(vk::BufferViewCreateInfo {
                 s_type: vk::StructureType::BufferViewCreateInfo,
