@@ -1011,56 +1011,40 @@ impl d::Device<B> for Device {
                     (vk::DescriptorType::Sampler, samplers.len(),
                         info_ptr, ptr::null(), ptr::null())
                 }
-                pso::DescriptorWrite::SampledImage(ref images) => {
+                
+                dt @ pso::DescriptorWrite::SampledImage(ref images) |
+                dt @ pso::DescriptorWrite::StorageImage(ref images) |
+                dt @ pso::DescriptorWrite::InputAttachment(ref images) => {
                     let info_ptr = &image_infos[cur_image_index] as *const _;
                     cur_image_index += images.len();
 
-                    (vk::DescriptorType::SampledImage, images.len(),
-                        info_ptr, ptr::null(), ptr::null())
-                }
-                pso::DescriptorWrite::StorageImage(ref images) => {
-                    let info_ptr = &image_infos[cur_image_index] as *const _;
-                    cur_image_index += images.len();
-
-                    (vk::DescriptorType::StorageImage, images.len(),
-                        info_ptr, ptr::null(), ptr::null())
-                }
-                pso::DescriptorWrite::InputAttachment(ref images) => {
-                    let info_ptr = &image_infos[cur_image_index] as *const _;
-                    cur_image_index += images.len();
-
-                    (vk::DescriptorType::InputAttachment, images.len(),
-                        info_ptr, ptr::null(), ptr::null())
+                    (match dt {
+                        pso::DescriptorWrite::SampledImage(_) => vk::DescriptorType::SampledImage,
+                        pso::DescriptorWrite::StorageImage(_) => vk::DescriptorType::StorageImage,
+                        pso::DescriptorWrite::InputAttachment(_) => vk::DescriptorType::InputAttachment
+                    }, images.len(), info_ptr, ptr::null(), ptr::null())
                 }
                 
-                pso::DescriptorWrite::UniformBuffer(ref buffers) => {
+                dt @ pso::DescriptorWrite::UniformBuffer(ref buffers) |
+                dt @ pso::DescriptorWrite::StorageBuffer(ref buffers) => {
                     let info_ptr = &buffer_infos[cur_buffer_index] as *const _;
                     cur_buffer_index += buffers.len();
 
-                    (vk::DescriptorType::UniformBuffer, buffers.len(),
-                        ptr::null(), info_ptr, ptr::null())
-                }
-                pso::DescriptorWrite::StorageBuffer(ref buffers) => {
-                    let info_ptr = &buffer_infos[cur_buffer_index] as *const _;
-                    cur_buffer_index += buffers.len();
-
-                    (vk::DescriptorType::StorageBuffer, buffers.len(),
-                        ptr::null(), info_ptr, ptr::null())
+                    (match dt {
+                        pso::DescriptorWrite::UniformBuffer(_) => vk::DescriptorType::UniformBuffer,
+                        pso::DescriptorWrite::StorageBuffer(_) => vk::DescriptorType::StorageBuffer
+                    }, buffers.len(), ptr::null(), info_ptr, ptr::null())
                 }
 
-                pso::DescriptorWrite::UniformTexelBuffer(ref texel_buffers) => {
+                dt @ pso::DescriptorWrite::UniformTexelBuffer(ref texel_buffers) |
+                dt @ pso::DescriptorWrite::StorageTexelBuffer(ref texel_buffers) => {
                     let info_ptr = &texel_buffer_views[cur_texel_index] as *const _;
                     cur_texel_index += texel_buffers.len();
 
-                    (vk::DescriptorType::UniformTexelBuffer, texel_buffers.len(),
-                        ptr::null(), ptr::null(), info_ptr)
-                }
-                pso::DescriptorWrite::StorageTexelBuffer(ref texel_buffers) => {
-                    let info_ptr = &texel_buffer_views[cur_texel_index] as *const _;
-                    cur_texel_index += texel_buffers.len();
-
-                    (vk::DescriptorType::StorageTexelBuffer, texel_buffers.len(),
-                        ptr::null(), ptr::null(), info_ptr)
+                    (match dt {
+                        pso::DescriptorWrite::UniformTexelBuffer(_) => vk::DescriptorType::UniformTexelBuffer,
+                        pso::DescriptorWrite::StorageTexelBuffer(_) => vk::DescriptorType::StorageTexelBuffer
+                    }, texel_buffers.len(), ptr::null(), ptr::null(), info_ptr)
                 }
                 
                 _ => unimplemented!(), // TODO
