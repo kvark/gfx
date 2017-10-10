@@ -611,6 +611,7 @@ impl core::Backend for Backend {
     type UnboundBuffer = device::UnboundBuffer;
     type Buffer = native::Buffer;
     type BufferView = native::BufferView;
+    type TexelBufferView = native::TexelBufferView;
     type UnboundImage = device::UnboundImage;
     type Image = native::Image;
     type ImageView = native::ImageView;

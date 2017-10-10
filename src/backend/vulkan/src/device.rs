@@ -709,6 +709,22 @@ impl d::Device<B> for Device {
         })
     }
 
+    fn create_texel_buffer_view(
+        &mut self, view: &n::BufferView, format: format::Format
+    ) -> Result<n::TexelBufferView, buffer::ViewError> {
+        Ok(n::TexelBufferView { raw: 
+            self.raw.0.create_buffer_view(vk::BufferViewCreateInfo {
+                s_type: vk::StructureType::BufferViewCreateInfo,
+                p_next: ptr::null(),
+                flags: vk::BufferViewCreateFlags::empty(),
+                buffer: view.buffer,
+                format: conv::map_format(format.0, format.1),
+                offset: view.range.start,
+                range: view.range.end - view.range.start,
+            }).expect("Error on texel buffer view creation") //TODO: Proper error handling
+        })
+    }
+
     fn create_image(&mut self, kind: image::Kind, mip_levels: image::Level, format: format::Format, usage: image::Usage)
          -> Result<UnboundImage, image::CreationError>
     {
@@ -922,7 +938,7 @@ impl d::Device<B> for Device {
     fn update_descriptor_sets(&mut self, writes: &[pso::DescriptorSetWrite<B>]) {
         let mut image_infos = Vec::new();
         let mut buffer_infos = Vec::new();
-        // let mut texel_buffer_views = Vec::new();
+        let mut texel_buffer_views = Vec::new();
 
         for write in writes {
             match write.write {
@@ -948,13 +964,21 @@ impl d::Device<B> for Device {
                     }
                 }
 
-                pso::DescriptorWrite::ConstantBuffer(ref cbvs) => {
-                    for cbv in cbvs {
+                pso::DescriptorWrite::UniformBuffer(ref buffers) |
+                pso::DescriptorWrite::StorageBuffer(ref buffers) => {
+                    for buffer in buffers {
                         buffer_infos.push(vk::DescriptorBufferInfo {
-                            buffer: cbv.buffer,
-                            offset: cbv.range.start,
-                            range: cbv.range.end - cbv.range.start,
+                            buffer: buffer.buffer,
+                            offset: buffer.range.start,
+                            range: buffer.range.end - buffer.range.start,
                         });
+                    }
+                }
+
+                pso::DescriptorWrite::UniformTexelBuffer(ref texel_buffers) |
+                pso::DescriptorWrite::StorageTexelBuffer(ref texel_buffers) => {
+                    for texel_buffer in texel_buffers {
+                        buffer_views.push(texel_buffer.raw)
                     }
                 }
 
@@ -965,8 +989,10 @@ impl d::Device<B> for Device {
         // Track current subslice for each write
         let mut cur_image_index = 0;
         let mut cur_buffer_index = 0;
+        let mut cur_texel_index = 0;
 
         let writes = writes.iter().map(|write| {
+
             let (ty, count, image_info, buffer_info, texel_buffer_view) = match write.write {
                 pso::DescriptorWrite::Sampler(ref samplers) => {
                     let info_ptr = &image_infos[cur_image_index] as *const _;
@@ -975,34 +1001,42 @@ impl d::Device<B> for Device {
                     (vk::DescriptorType::Sampler, samplers.len(),
                         info_ptr, ptr::null(), ptr::null())
                 }
-                pso::DescriptorWrite::SampledImage(ref images) => {
+                
+                dt @ pso::DescriptorWrite::SampledImage(ref images) |
+                dt @ pso::DescriptorWrite::StorageImage(ref images) |
+                dt @ pso::DescriptorWrite::InputAttachment(ref images) => {
                     let info_ptr = &image_infos[cur_image_index] as *const _;
                     cur_image_index += images.len();
 
-                    (vk::DescriptorType::SampledImage, images.len(),
-                        info_ptr, ptr::null(), ptr::null())
+                    (match dt {
+                        pso::DescriptorWrite::SampledImage(_) => vk::DescriptorType::SampledImage,
+                        pso::DescriptorWrite::StorageImage(_) => vk::DescriptorType::StorageImage,
+                        pso::DescriptorWrite::InputAttachment(_) => vk::DescriptorType::InputAttachment
+                    }, images.len(), info_ptr, ptr::null(), ptr::null())
                 }
-                pso::DescriptorWrite::StorageImage(ref images) => {
-                    let info_ptr = &image_infos[cur_image_index] as *const _;
-                    cur_image_index += images.len();
-
-                    (vk::DescriptorType::StorageImage, images.len(),
-                        info_ptr, ptr::null(), ptr::null())
-                }
-                pso::DescriptorWrite::ConstantBuffer(ref cbvs) => {
+                
+                dt @ pso::DescriptorWrite::UniformBuffer(ref buffers) |
+                dt @ pso::DescriptorWrite::StorageBuffer(ref buffers) => {
                     let info_ptr = &buffer_infos[cur_buffer_index] as *const _;
-                    cur_buffer_index += cbvs.len();
+                    cur_buffer_index += buffers.len();
 
-                    (vk::DescriptorType::UniformBuffer, cbvs.len(),
-                        ptr::null(), info_ptr, ptr::null())
+                    (match dt {
+                        pso::DescriptorWrite::UniformBuffer(_) => vk::DescriptorType::UniformBuffer,
+                        pso::DescriptorWrite::StorageBuffer(_) => vk::DescriptorType::StorageBuffer
+                    }, buffers.len(), ptr::null(), info_ptr, ptr::null())
                 }
-                pso::DescriptorWrite::InputAttachment(ref images) => {
-                    let info_ptr = &image_infos[cur_image_index] as *const _;
-                    cur_image_index += images.len();
 
-                    (vk::DescriptorType::InputAttachment, images.len(),
-                        info_ptr, ptr::null(), ptr::null())
+                dt @ pso::DescriptorWrite::UniformTexelBuffer(ref texel_buffers) |
+                dt @ pso::DescriptorWrite::StorageTexelBuffer(ref texel_buffers) => {
+                    let info_ptr = &texel_buffer_views[cur_texel_index] as *const _;
+                    cur_texel_index += texel_buffers.len();
+
+                    (match dt {
+                        pso::DescriptorWrite::UniformTexelBuffer(_) => vk::DescriptorType::UniformTexelBuffer,
+                        pso::DescriptorWrite::StorageTexelBuffer(_) => vk::DescriptorType::StorageTexelBuffer
+                    }, texel_buffers.len(), ptr::null(), ptr::null(), info_ptr)
                 }
+                
                 _ => unimplemented!(), // TODO
             };
 
