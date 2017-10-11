@@ -712,20 +712,11 @@ impl d::Device<B> for Device {
 
         Ok(buffer)
     }
-
+    
     fn create_buffer_view(
-        &mut self, buffer: &n::Buffer, range: Range<u64>,
-    ) -> Result<n::BufferView, buffer::ViewError> {
-        Ok(n::BufferView {
-            buffer: buffer.raw,
-            range,
-        })
-    }
-
-    fn create_texel_buffer_view(
         &mut self, view: &n::BufferView, format: format::Format
-    ) -> Result<n::TexelBufferView, buffer::ViewError> {
-        Ok(n::TexelBufferView { raw: 
+    ) -> Result<n::BufferView, buffer::ViewError> {
+        Ok(n::BufferView { raw: 
             self.raw.0.create_buffer_view(vk::BufferViewCreateInfo {
                 s_type: vk::StructureType::BufferViewCreateInfo,
                 p_next: ptr::null(),
@@ -734,7 +725,7 @@ impl d::Device<B> for Device {
                 format: conv::map_format(format.0, format.1),
                 offset: view.range.start,
                 range: view.range.end - view.range.start,
-            }).expect("Error on texel buffer view creation") //TODO: Proper error handling
+            }).expect("Error on buffer view creation") //TODO: Proper error handling
         })
     }
 
@@ -976,19 +967,19 @@ impl d::Device<B> for Device {
 
                 pso::DescriptorWrite::UniformBuffer(ref buffers) |
                 pso::DescriptorWrite::StorageBuffer(ref buffers) => {
-                    for buffer in buffers {
+                    for &(buffer, range) in buffers {
                         buffer_infos.push(vk::DescriptorBufferInfo {
-                            buffer: buffer.buffer,
-                            offset: buffer.range.start,
-                            range: buffer.range.end - buffer.range.start,
+                            buffer: buffer.raw,
+                            offset: range.start,
+                            range: range.end - range.start,
                         });
                     }
                 }
 
-                pso::DescriptorWrite::UniformTexelBuffer(ref texel_buffers) |
-                pso::DescriptorWrite::StorageTexelBuffer(ref texel_buffers) => {
-                    for texel_buffer in texel_buffers {
-                        buffer_views.push(texel_buffer.raw)
+                pso::DescriptorWrite::UniformTexelBuffer(ref views) |
+                pso::DescriptorWrite::StorageTexelBuffer(ref views) => {
+                    for view in views {
+                        texel_buffer_views.push(view.raw)
                     }
                 }
 
@@ -999,7 +990,7 @@ impl d::Device<B> for Device {
         // Track current subslice for each write
         let mut cur_image_index = 0;
         let mut cur_buffer_index = 0;
-        let mut cur_texel_index = 0;
+        let mut cur_view_index = 0;
 
         let writes = writes.iter().map(|write| {
 
@@ -1036,15 +1027,15 @@ impl d::Device<B> for Device {
                     }, buffers.len(), ptr::null(), info_ptr, ptr::null())
                 }
 
-                dt @ pso::DescriptorWrite::UniformTexelBuffer(ref texel_buffers) |
-                dt @ pso::DescriptorWrite::StorageTexelBuffer(ref texel_buffers) => {
-                    let info_ptr = &texel_buffer_views[cur_texel_index] as *const _;
-                    cur_texel_index += texel_buffers.len();
+                dt @ pso::DescriptorWrite::UniformTexelBuffer(ref views) |
+                dt @ pso::DescriptorWrite::StorageTexelBuffer(ref views) => {
+                    let info_ptr = &views[cur_view_index] as *const _;
+                    cur_view_index += views.len();
 
                     (match dt {
                         pso::DescriptorWrite::UniformTexelBuffer(_) => vk::DescriptorType::UniformTexelBuffer,
                         pso::DescriptorWrite::StorageTexelBuffer(_) => vk::DescriptorType::StorageTexelBuffer
-                    }, texel_buffers.len(), ptr::null(), ptr::null(), info_ptr)
+                    }, views.len(), ptr::null(), ptr::null(), info_ptr)
                 }
                 
                 _ => unimplemented!(), // TODO

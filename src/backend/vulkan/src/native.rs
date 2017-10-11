@@ -37,12 +37,6 @@ unsafe impl Send for Buffer {}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct BufferView {
-    pub(crate) buffer: vk::Buffer,
-    pub(crate) range: Range<u64>,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct TexelBufferView {
     pub(crate) raw: vk::BufferView,
 }
 

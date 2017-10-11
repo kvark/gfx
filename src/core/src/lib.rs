@@ -265,7 +265,6 @@ pub trait Backend: 'static + Sized + Eq + Clone + Hash + Debug + Any {
     type UnboundBuffer:       Debug + Any + Send + Sync;
     type Buffer:              Debug + Any + Send + Sync;
     type BufferView:          Debug + Any + Send + Sync;
-    type TexelBufferView:     Debug + Any + Send + Sync;
     type UnboundImage:        Debug + Any + Send + Sync;
     type Image:               Debug + Any + Send + Sync;
     type ImageView:           Debug + Any + Send + Sync;
