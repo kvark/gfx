@@ -287,6 +287,7 @@ impl hal::Instance for Instance {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "portable", derive(Clone))]
 pub struct QueueFamily {
     properties: vk::QueueFamilyProperties,
     device: vk::PhysicalDevice,
@@ -306,6 +307,7 @@ impl hal::queue::QueueFamily for QueueFamily {
 }
 
 
+#[cfg_attr(feature = "portable", derive(Clone))]
 pub struct PhysicalDevice {
     instance: Arc<RawInstance>,
     handle: vk::PhysicalDevice,
