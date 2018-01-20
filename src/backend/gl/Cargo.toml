@@ -16,6 +16,7 @@ name = "gfx_backend_gl"
 
 [features]
 default = ["glutin"]
+portable = []
 
 [dependencies]
 log = "0.3"

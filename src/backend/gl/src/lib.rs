@@ -283,6 +283,7 @@ impl hal::PhysicalDevice<Backend> for PhysicalDevice {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "portable", derive(Clone))]
 pub struct QueueFamily(hal::QueueType);
 
 impl hal::QueueFamily for QueueFamily {

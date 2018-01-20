@@ -40,6 +40,7 @@ use core_graphics::geometry::CGRect;
 
 
 #[derive(Debug)]
+#[cfg_attr(feature = "portable", derive(Clone))]
 pub struct QueueFamily {}
 
 impl hal::QueueFamily for QueueFamily {
