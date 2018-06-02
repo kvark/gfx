@@ -1053,7 +1053,11 @@ impl CommandBuffer {
             width: vp.rect.w as _,
             height: vp.rect.h as _,
             znear: vp.depth.start as _,
-            zfar: vp.depth.end as _,
+            zfar: if self.shared.disabilities.broken_viewport_near_depth {
+                (vp.depth.end - vp.depth.start) as _
+            } else {
+                vp.depth.end as _
+            },
         };
         self.state.viewport = Some(viewport);
         soft::RenderCommand::SetViewport(viewport)
