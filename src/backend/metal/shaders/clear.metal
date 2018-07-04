@@ -18,6 +18,7 @@ typedef struct {
 vertex ClearVertexData vs_clear(ClearAttributes in [[stage_in]]) {
     float4 pos = { 0.0, 0.0, in.coords.z, 1.0f };
     pos.xy = in.coords.xy * 2.0 - 1.0;
+    pos.y = pos.y * -1.0;
     return ClearVertexData { pos, uint(in.coords.w) };
 }
 
