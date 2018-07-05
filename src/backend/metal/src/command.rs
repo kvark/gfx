@@ -39,6 +39,7 @@ const CLEAR_IMAGE_ARRAY: bool = false;
 pub struct QueueInner {
     raw: metal::CommandQueue,
     reserve: Range<usize>,
+    debug_retain_references: bool,
 }
 
 #[must_use]
@@ -55,10 +56,17 @@ impl Drop for Token {
 }
 
 impl QueueInner {
-    pub(crate) fn new(device: &metal::DeviceRef, pool_size: usize) -> Self {
+    pub(crate) fn new(
+        device: &metal::DeviceRef,
+        pool_size: Option<usize>,
+    ) -> Self {
         QueueInner {
-            raw: device.new_command_queue_with_max_command_buffer_count(pool_size as u64),
-            reserve: 0 .. pool_size,
+            raw: match pool_size {
+                Some(count) => device.new_command_queue_with_max_command_buffer_count(count as u64),
+                None => device.new_command_queue(),
+            },
+            reserve: 0 .. pool_size.unwrap_or(64),
+            debug_retain_references: true,
         }
     }
 
@@ -66,10 +74,16 @@ impl QueueInner {
     pub(crate) fn spawn(&mut self) -> (metal::CommandBuffer, Token) {
         let _pool = AutoreleasePool::new();
         self.reserve.start += 1;
-        let cmd_buf = self.raw
-            .new_command_buffer_with_unretained_references()
-            .to_owned();
+        let cmd_buf = self.spawn_temp().to_owned();
         (cmd_buf, Token { active: true })
+    }
+
+    fn spawn_temp(&self) -> &metal::CommandBufferRef {
+        if self.debug_retain_references {
+            self.raw.new_command_buffer()
+        } else {
+            self.raw.new_command_buffer_with_unretained_references()
+        }
     }
 
     /// Returns a command buffer to a virtual pool.
@@ -974,6 +988,7 @@ fn exec_render<'a>(encoder: &metal::RenderCommandEncoderRef, command: soft::Rend
         }
         Cmd::BindTexture { stage, index, texture } => {
             let native = texture.as_ref().map(|t| t.as_native());
+            println!("BindTexture at {:?} [{}]] {:?}", stage, index, texture);
             match stage {
                 pso::Stage::Vertex =>
                     encoder.set_vertex_texture(index as _, native),
@@ -1246,6 +1261,7 @@ impl RawCommandQueue<Backend> for CommandQueue {
         IC: IntoIterator,
         IC::Item: Borrow<CommandBuffer>,
     {
+        let _pool = AutoreleasePool::new();
         debug!("submitting with fence {:?}", fence);
 
         self.wait(submit.wait_semaphores.iter().map(|&(s, _)| s));
@@ -1299,7 +1315,7 @@ impl RawCommandQueue<Backend> for CommandQueue {
                 Some(CommandSink::Deferred { ref passes, .. }) => {
                     num_deferred += 1;
                     trace!("\tdeferred with {} passes", passes.len());
-                    temp_cmd_buffer = queue.raw.new_command_buffer_with_unretained_references();
+                    temp_cmd_buffer = queue.spawn_temp();
                     temp_cmd_buffer.set_label("deferred");
                     record_commands(&*temp_cmd_buffer, passes);
                     &*temp_cmd_buffer
@@ -1315,7 +1331,7 @@ impl RawCommandQueue<Backend> for CommandQueue {
         debug!("\t{} immediate, {} deferred command buffers", num_immediate, num_deferred);
 
         if let Some(ref fence) = fence {
-            let command_buffer = queue.raw.new_command_buffer_with_unretained_references();
+            let command_buffer = queue.spawn_temp();
             command_buffer.set_label("fence");
             let fence = Arc::clone(fence);
             let fence_block = ConcreteBlock::new(move |_cb: *mut ()| -> () {
