@@ -165,6 +165,8 @@ pub struct CommandBuffer {
     inner: CommandBufferInnerPtr,
     state: State,
     temp: Temp,
+    begin_moment: time::Instant,
+    finish_moment: time::Instant,
 }
 
 unsafe impl Send for CommandBuffer {}
@@ -766,6 +768,7 @@ enum CommandSink {
         cmd_buffer: Arc<Mutex<metal::CommandBuffer>>,
         token: Token,
         pass: Option<EncodePass>,
+        num_passes: usize,
         capacity: Capacity,
     },
 }
@@ -892,8 +895,9 @@ impl CommandSink {
             CommandSink::Remote { pass: Some(EncodePass::Blit(ref mut list)), .. } => {
                 list.extend(commands.into_iter().map(soft::BlitCommand::own));
             }
-            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut capacity, .. } => {
+            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut num_passes, ref mut capacity, .. } => {
                 if let Some(pass) = pass.take() {
+                    *num_passes += 1;
                     pass.update(capacity);
                     pass.schedule(queue, cmd_buffer);
                 }
@@ -951,8 +955,9 @@ impl CommandSink {
                 *is_encoding = false;
                 journal.stop();
             }
-            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut capacity, .. } => {
+            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut num_passes, ref mut capacity, .. } => {
                 if let Some(pass) = pass.take() {
+                    *num_passes += 1;
                     pass.update(capacity);
                     pass.schedule(queue, cmd_buffer);
                 }
@@ -1004,7 +1009,8 @@ impl CommandSink {
                 }
                 journal.passes.push((pass, range))
             }
-            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref capacity, .. } => {
+            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut num_passes, ref capacity, .. } => {
+                *num_passes += 1;
                 let desc = unsafe {
                     let desc: metal::RenderPassDescriptor = msg_send![descriptor, copy];
                     msg_send![desc.as_ptr(), retain];
@@ -1057,7 +1063,8 @@ impl CommandSink {
                 };
                 journal.passes.push((soft::Pass::Compute, range))
             }
-            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref capacity, .. } => {
+            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut num_passes, ref capacity, .. } => {
+                *num_passes += 1;
                 let mut list = Vec::with_capacity(capacity.compute);
                 list.extend(init_commands.map(soft::ComputeCommand::own));
                 let new_pass = EncodePass::Compute(list);
@@ -1431,6 +1438,9 @@ struct PerformanceCounters {
     signal_command_buffers: usize,
     frame_wait_duration: time::Duration,
     frame_wait_count: usize,
+    command_first_begin_to_submit: time::Duration,
+    command_last_finish_to_submit: time::Duration,
+    submit_duration: time::Duration,
     frame: usize,
 }
 
@@ -1494,26 +1504,35 @@ impl RawCommandQueue<Backend> for CommandQueue {
 
         self.wait(submit.wait_semaphores.iter().map(|&(s, _)| s));
 
+        let submit_start = time::Instant::now();
+        let mut record_first_begin = submit_start;
+        let mut record_last_finish = submit_start - time::Duration::from_secs(1);
+
         let cmd_queue = self.shared.queue.lock();
         let (mut num_immediate, mut num_deferred, mut num_remote) = (0, 0, 0);
         let mut deferred_cmd_buffer = None::<&metal::CommandBufferRef>;
 
-        for buffer in submit.cmd_buffers {
-            let mut inner = buffer.borrow().inner.borrow_mut();
+        for command_buffer in submit.cmd_buffers {
+            let command_buffer = command_buffer.borrow();
+            if self.perf_counters.is_some() {
+                record_first_begin = record_first_begin.min(command_buffer.begin_moment);
+                record_last_finish = record_last_finish.max(command_buffer.finish_moment);
+            }
+
             let CommandBufferInner {
                 ref sink,
                 ref mut retained_buffers,
                 ref mut retained_textures,
                 ..
-            } = *inner;
+            } = *command_buffer.inner.borrow_mut();
 
             match *sink {
                 Some(CommandSink::Immediate { ref cmd_buffer, ref token, num_passes, .. }) => {
-                    num_immediate += 1;
                     trace!("\timmediate {:?} with {} passes", token, num_passes);
                     self.retained_buffers.extend(retained_buffers.drain(..));
                     self.retained_textures.extend(retained_textures.drain(..));
                     if num_passes != 0 {
+                        num_immediate += 1;
                         // flush the deferred recording, if any
                         if let Some(cb) = deferred_cmd_buffer.take() {
                             cb.commit();
@@ -1522,9 +1541,9 @@ impl RawCommandQueue<Backend> for CommandQueue {
                     }
                 }
                 Some(CommandSink::Deferred { ref journal, .. }) => {
-                    num_deferred += 1;
                     trace!("\tdeferred with {} passes", journal.passes.len());
                     if !journal.passes.is_empty() {
+                        num_deferred += 1;
                         let cmd_buffer = deferred_cmd_buffer
                             .take()
                             .unwrap_or_else(|| {
@@ -1539,14 +1558,18 @@ impl RawCommandQueue<Backend> for CommandQueue {
                         }
                     }
                  }
-                 Some(CommandSink::Remote { ref queue, ref cmd_buffer, ref token, .. }) => {
-                    num_remote += 1;
+                 Some(CommandSink::Remote { ref queue, ref cmd_buffer, ref token, num_passes, .. }) => {
                     trace!("\tremote {:?}", token);
-                    cmd_buffer.lock().enqueue();
-                    let shared_cb = SharedCommandBuffer(Arc::clone(cmd_buffer));
-                    queue.sync(move || {
-                        shared_cb.0.lock().commit();
-                    });
+                    self.retained_buffers.extend(retained_buffers.drain(..));
+                    self.retained_textures.extend(retained_textures.drain(..));
+                    if num_passes != 0 {
+                        num_remote += 1;
+                        cmd_buffer.lock().enqueue();
+                        let shared_cb = SharedCommandBuffer(Arc::clone(cmd_buffer));
+                        queue.sync(move || {
+                            shared_cb.0.lock().commit();
+                        });
+                    }
                  }
                  None => panic!("Command buffer not recorded for submission")
             }
@@ -1555,9 +1578,14 @@ impl RawCommandQueue<Backend> for CommandQueue {
         debug!("\t{} immediate, {} deferred, and {} remote command buffers",
             num_immediate, num_deferred, num_remote);
         if let Some(ref mut counters) = self.perf_counters {
-            counters.immediate_command_buffers += num_immediate;
-            counters.deferred_command_buffers += num_deferred;
-            counters.remote_command_buffers += num_remote;
+            if num_immediate + num_deferred + num_remote != 0 {
+                counters.immediate_command_buffers += num_immediate;
+                counters.deferred_command_buffers += num_deferred;
+                counters.remote_command_buffers += num_remote;
+                counters.command_first_begin_to_submit += submit_start - record_first_begin;
+                counters.command_last_finish_to_submit += submit_start - record_last_finish;
+                counters.submit_duration += submit_start.elapsed();
+            }
         }
 
         const BLOCK_BUCKET: usize = 4;
@@ -1633,26 +1661,26 @@ impl RawCommandQueue<Backend> for CommandQueue {
         if let Some(ref mut counters) = self.perf_counters {
             counters.frame += 1;
             if counters.frame >= COUNTERS_REPORT_WINDOW {
-                let time = counters.frame_wait_duration / counters.frame as u32;
-                let total_submitted =
-                    counters.immediate_command_buffers +
-                    counters.deferred_command_buffers +
-                    counters.remote_command_buffers +
-                    counters.signal_command_buffers;
+                fn ms(dur: time::Duration) -> f32 {
+                    assert_eq!(0, dur.as_secs());
+                    dur.subsec_micros() as f32 / 1000.0
+                }
                 println!("Performance counters:");
-                println!("\tCommand buffers: {} immediate, {} deferred, {} remote, {} signals",
+                println!("\tCommand buffers: {} immediate, {} deferred, {} remote, {} signals, and {} total active",
                     counters.immediate_command_buffers / counters.frame,
                     counters.deferred_command_buffers / counters.frame,
                     counters.remote_command_buffers / counters.frame,
                     counters.signal_command_buffers / counters.frame,
-                );
-                println!("\tEstimated pipeline length is {} frames, given the total active {} command buffers",
-                    counters.frame * queue.reserve.start / total_submitted.max(1),
                     queue.reserve.start,
                 );
                 println!("\tFrame wait time is {}ms over {} requests",
-                    time.as_secs() as u32 * 1000 + time.subsec_millis(),
+                    ms(counters.frame_wait_duration / counters.frame as u32),
                     counters.frame_wait_count as f32 / counters.frame as f32,
+                );
+                println!("\tRecord to submission time is {}ms, finish to submission - {}ms, submission itself - {}ms",
+                    ms(counters.command_first_begin_to_submit / counters.frame as u32),
+                    ms(counters.command_last_finish_to_submit / counters.frame as u32),
+                    ms(counters.submit_duration / counters.frame as u32),
                 );
                 *counters = PerformanceCounters::default();
             }
@@ -1728,6 +1756,8 @@ impl pool::RawCommandPool<Backend> for CommandPool {
                 clear_vertices: Vec::new(),
                 blit_vertices: FastHashMap::default(),
             },
+            begin_moment: time::Instant::now(),
+            finish_moment: time::Instant::now(),
         }).collect();
 
         self.allocated.extend(buffers.iter().map(|buf| buf.inner.clone()));
@@ -1801,6 +1831,7 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                     cmd_buffer: Arc::new(Mutex::new(cmd_buffer)),
                     token,
                     pass: None,
+                    num_passes: 0,
                     capacity: inner.backup_capacity.take().unwrap_or_default(),
                 }
             }
@@ -1812,10 +1843,12 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
             }
         };
         inner.sink = Some(sink);
+        self.begin_moment = time::Instant::now();
         self.state.reset_resources();
     }
 
     fn finish(&mut self) {
+        self.finish_moment = time::Instant::now();
         self.inner
             .borrow_mut()
             .sink()
