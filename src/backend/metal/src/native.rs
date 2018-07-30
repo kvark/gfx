@@ -63,7 +63,7 @@ pub struct RenderPassKey {
 
 #[derive(Debug)]
 pub struct RenderPass {
-    pub(crate) attachments: Vec<Attachment>,
+    pub(crate) attachments: Arc<Vec<Attachment>>,
 }
 
 unsafe impl Send for RenderPass {}
@@ -138,7 +138,7 @@ pub struct FramebufferInner {
 #[derive(Debug)]
 pub struct Framebuffer {
     pub(crate) descriptor: metal::RenderPassDescriptor,
-    pub(crate) desc_storage: FastStorageMap<RenderPassKey, metal::RenderPassDescriptor>,
+    pub(crate) desc_storage: Arc<FastStorageMap<RenderPassKey, metal::RenderPassDescriptor>>,
     pub(crate) inner: FramebufferInner,
 }
 

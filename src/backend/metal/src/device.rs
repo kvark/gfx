@@ -623,9 +623,11 @@ impl hal::Device<Backend> for Device {
         ID::Item: Borrow<pass::SubpassDependency>,
     {
         n::RenderPass {
-            attachments: attachments.into_iter()
-                .map(|at| at.borrow().clone())
-                .collect(),
+            attachments: Arc::new(
+                attachments.into_iter()
+                    .map(|at| at.borrow().clone())
+                    .collect()
+            ),
         }
     }
 
@@ -1102,7 +1104,7 @@ impl hal::Device<Backend> for Device {
 
         Ok(n::Framebuffer {
             descriptor,
-            desc_storage: FastStorageMap::default(),
+            desc_storage: Arc::new(FastStorageMap::default()),
             inner,
         })
     }

@@ -3,7 +3,7 @@ use {
     BufferPtr, TexturePtr, SamplerPtr,
 };
 use {conversions as conv, native, soft, window};
-use internal::{BlitVertex, Channel, ClearKey, ClearVertex};
+use internal::{BlitVertex, Channel, ClearKey, ClearVertex, FastStorageMap};
 
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -16,7 +16,7 @@ use hal::{DrawCount, SwapImageIndex, VertexCount, VertexOffset, InstanceCount, I
 use hal::backend::FastHashMap;
 use hal::format::{Aspects, Format, FormatDesc};
 use hal::image::{Extent, Filter, Layout, Level, SubresourceRange};
-use hal::pass::{AttachmentLoadOp, AttachmentOps};
+use hal::pass::{Attachment, AttachmentLoadOp, AttachmentOps};
 use hal::query::{Query, QueryControl, QueryId};
 use hal::queue::{RawCommandQueue, RawSubmission};
 use hal::range::RangeArg;
@@ -614,13 +614,19 @@ struct SharedCommandBuffer(Arc<Mutex<metal::CommandBuffer>>);
 unsafe impl Send for SharedCommandBuffer {}
 
 impl EncodePass {
-    fn schedule(self, queue: &dispatch::Queue, cmd_buffer_arc: &Arc<Mutex<metal::CommandBuffer>>) {
+    fn schedule(
+        self,
+        queue: &dispatch::Queue,
+        cmd_buffer_arc: &Arc<Mutex<metal::CommandBuffer>>,
+        shared: &Arc<Shared>,
+    ) {
         let cmd_buffer = SharedCommandBuffer(Arc::clone(cmd_buffer_arc));
+        let shared = Arc::clone(shared);
         queue.async(move|| match self {
             EncodePass::Render(list, desc) => {
                 let encoder = cmd_buffer.0.lock().new_render_command_encoder(&desc).to_owned();
                 for command in list {
-                    exec_render(&encoder, command);
+                    exec_render(&encoder, command, &shared);
                 }
                 encoder.end_encoding();
             }
@@ -651,7 +657,7 @@ impl EncodePass {
 }
 
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct Journal {
     passes: Vec<(soft::Pass, Range<usize>)>,
     render_commands: Vec<soft::RenderCommand<soft::Own>>,
@@ -670,7 +676,8 @@ impl Journal {
     fn stop(&mut self) {
         match self.passes.last_mut() {
             None => {}
-            Some(&mut (soft::Pass::Render(_), ref mut range)) => {
+            Some(&mut (soft::Pass::Render{ .. }, ref mut range)) |
+            Some(&mut (soft::Pass::RenderInternal(_), ref mut range)) => {
                 range.end = self.render_commands.len();
             }
             Some(&mut (soft::Pass::Compute, ref mut range)) => {
@@ -682,13 +689,21 @@ impl Journal {
         };
     }
 
-    fn record(&self, command_buf: &metal::CommandBufferRef) {
-        for (ref pass, ref range) in &self.passes {
+    fn record(&self, command_buf: &metal::CommandBufferRef, shared: &Shared) {
+        for &(ref pass, ref range) in &self.passes {
             match *pass {
-                soft::Pass::Render(ref desc) => {
-                    let encoder = command_buf.new_render_command_encoder(desc);
+                soft::Pass::Render{ ref key, ref storage, ref base_desc, ref attachments } => {
+                    let desc = storage.get_or_create_with(key, || create_render_pass(key, base_desc, attachments));
+                    let encoder = command_buf.new_render_command_encoder(&**desc);
                     for command in &self.render_commands[range.clone()] {
-                        exec_render(&encoder, command);
+                        exec_render(&encoder, command, shared);
+                    }
+                    encoder.end_encoding();
+                }
+                soft::Pass::RenderInternal(ref descriptor) => {
+                    let encoder = command_buf.new_render_command_encoder(descriptor);
+                    for command in &self.render_commands[range.clone()] {
+                        exec_render(&encoder, command, shared);
                     }
                     encoder.end_encoding();
                 }
@@ -717,6 +732,7 @@ enum CommandSink {
         token: Token,
         encoder_state: EncoderState,
         num_passes: usize,
+        shared: Arc<Shared>,
     },
     Deferred {
         is_encoding: bool,
@@ -728,6 +744,7 @@ enum CommandSink {
         token: Token,
         pass: Option<EncodePass>,
         capacity: Capacity,
+        shared: Arc<Shared>,
     },
 }
 
@@ -739,7 +756,7 @@ enum PassDoor<'a> {
 /// A helper temporary object that consumes state-setting commands only
 /// applicable to a render pass currently encoded.
 enum PreRender<'a> {
-    Immediate(&'a metal::RenderCommandEncoder),
+    Immediate(&'a metal::RenderCommandEncoder, &'a Shared),
     Deferred(&'a mut Vec<soft::RenderCommand<soft::Own>>),
     Void,
 }
@@ -754,7 +771,7 @@ impl<'a> PreRender<'a> {
 
     fn issue<'b>(&mut self, command: soft::RenderCommand<&'b soft::Own>) {
         match *self {
-            PreRender::Immediate(encoder) => exec_render(encoder, command),
+            PreRender::Immediate(encoder, shared) => exec_render(encoder, command, shared),
             PreRender::Deferred(ref mut list) => list.push(command.own()),
             PreRender::Void => (),
         }
@@ -784,12 +801,13 @@ impl CommandSink {
     /// for updating the state cache accordingly, so that it's set upon the start of a next pass.
     fn pre_render(&mut self) -> PreRender {
         match *self {
-            CommandSink::Immediate { encoder_state: EncoderState::Render(ref encoder), .. } => {
-                PreRender::Immediate(encoder)
+            CommandSink::Immediate { encoder_state: EncoderState::Render(ref encoder), ref shared, .. } => {
+                PreRender::Immediate(encoder, shared)
             }
             CommandSink::Deferred { is_encoding: true, ref mut journal } => {
                 match journal.passes.last() {
-                    Some(&(soft::Pass::Render(_), _)) => PreRender::Deferred(&mut journal.render_commands),
+                    Some(&(soft::Pass::Render{ .. }, _)) |
+                    Some(&(soft::Pass::RenderInternal(_), _)) => PreRender::Deferred(&mut journal.render_commands),
                     _ => PreRender::Void,
                 }
             }
@@ -806,9 +824,9 @@ impl CommandSink {
         I: Iterator<Item = soft::RenderCommand<&'a soft::Own>>,
     {
         match self.pre_render() {
-            PreRender::Immediate(encoder) => {
+            PreRender::Immediate(encoder, shared) => {
                 for command in commands {
-                    exec_render(encoder, command);
+                    exec_render(encoder, command, shared);
                 }
             }
             PreRender::Deferred(ref mut list) => {
@@ -853,10 +871,10 @@ impl CommandSink {
             CommandSink::Remote { pass: Some(EncodePass::Blit(ref mut list)), .. } => {
                 list.extend(commands);
             }
-            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut capacity, .. } => {
+            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut capacity, ref shared, .. } => {
                 if let Some(pass) = pass.take() {
                     pass.update(capacity);
-                    pass.schedule(queue, cmd_buffer);
+                    pass.schedule(queue, cmd_buffer, shared);
                 }
                 let mut list = Vec::with_capacity(capacity.blit);
                 list.extend(commands);
@@ -912,10 +930,10 @@ impl CommandSink {
                 *is_encoding = false;
                 journal.stop();
             }
-            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut capacity, .. } => {
+            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref mut capacity, ref shared, .. } => {
                 if let Some(pass) = pass.take() {
                     pass.update(capacity);
-                    pass.schedule(queue, cmd_buffer);
+                    pass.schedule(queue, cmd_buffer, shared);
                 }
             }
         }
@@ -923,7 +941,52 @@ impl CommandSink {
 
     fn begin_render_pass<'a, I>(
         &mut self,
-        door: PassDoor,
+        key: native::RenderPassKey,
+        storage: &Arc<FastStorageMap<native::RenderPassKey, metal::RenderPassDescriptor>>,
+        base_desc: &'a metal::RenderPassDescriptorRef,
+        attachments: &'a Arc<Vec<Attachment>>,
+        init_commands: I,
+    ) where
+        I: Iterator<Item = soft::RenderCommand<&'a soft::Own>>,
+    {
+        //assert!(AutoReleasePool::is_active());
+        self.stop_encoding();
+
+        match *self {
+            CommandSink::Immediate { ref cmd_buffer, ref mut encoder_state, ref mut num_passes, ref shared, .. } => {
+                *num_passes += 1;
+                let descriptor = storage.get_or_create_with(&key, || create_render_pass(&key, base_desc, attachments));
+                let encoder = cmd_buffer.new_render_command_encoder(&**descriptor);
+                for command in init_commands {
+                    exec_render(encoder, command, shared);
+                }
+                *encoder_state = EncoderState::Render(encoder.to_owned())
+            }
+            CommandSink::Deferred { ref mut is_encoding, ref mut journal } => {
+                let pass = soft::Pass::Render {
+                    key,
+                    storage: Arc::clone(storage),
+                    base_desc: base_desc.to_owned(),
+                    attachments: Arc::clone(attachments),
+                };
+                let mut range = journal.render_commands.len() .. 0;
+                journal.render_commands.extend(init_commands.map(soft::RenderCommand::own));
+                *is_encoding = true;
+                journal.passes.push((pass, range))
+            }
+            CommandSink::Remote { ref mut pass, ref capacity, .. } => {
+                let mut list = Vec::with_capacity(capacity.render);
+                list.extend(init_commands.map(soft::RenderCommand::own));
+                let descriptor = storage.get_or_create_with(&key, || create_render_pass(&key, base_desc, attachments));
+                let new_pass = EncodePass::Render(list, descriptor.to_owned());
+                *pass = Some(new_pass);
+            }
+        }
+    }
+
+    fn begin_render_pass_internal<'a, I>(
+        &mut self,
+        label: &str,
         descriptor: &'a metal::RenderPassDescriptorRef,
         init_commands: I,
     ) where
@@ -933,40 +996,27 @@ impl CommandSink {
         self.stop_encoding();
 
         match *self {
-            CommandSink::Immediate { ref cmd_buffer, ref mut encoder_state, ref mut num_passes, .. } => {
+            CommandSink::Immediate { ref cmd_buffer, ref mut num_passes, ref shared, .. } => {
                 *num_passes += 1;
                 let encoder = cmd_buffer.new_render_command_encoder(descriptor);
                 for command in init_commands {
-                    exec_render(encoder, command);
+                    exec_render(encoder, command, shared);
                 }
-                match door {
-                    PassDoor::Open => {
-                        *encoder_state = EncoderState::Render(encoder.to_owned())
-                    }
-                    PassDoor::Closed { label } => {
-                        encoder.set_label(label);
-                        encoder.end_encoding();
-                    }
-                }
+                encoder.set_label(label);
+                encoder.end_encoding();
             }
-            CommandSink::Deferred { ref mut is_encoding, ref mut journal } => {
-                let pass = soft::Pass::Render(descriptor.to_owned());
+            CommandSink::Deferred { ref mut journal, .. } => {
+                let pass = soft::Pass::RenderInternal(descriptor.to_owned());
                 let mut range = journal.render_commands.len() .. 0;
                 journal.render_commands.extend(init_commands.map(soft::RenderCommand::own));
-                match door {
-                    PassDoor::Open => *is_encoding = true,
-                    PassDoor::Closed {..} => range.end = journal.render_commands.len(),
-                }
+                range.end = journal.render_commands.len();
                 journal.passes.push((pass, range))
             }
-            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref capacity, .. } => {
+            CommandSink::Remote { ref queue, ref cmd_buffer, ref capacity, ref shared, .. } => {
                 let mut list = Vec::with_capacity(capacity.render);
                 list.extend(init_commands.map(soft::RenderCommand::own));
-                let new_pass = EncodePass::Render(list, descriptor.to_owned());
-                match door {
-                    PassDoor::Open => *pass = Some(new_pass),
-                    PassDoor::Closed { .. } => new_pass.schedule(queue, cmd_buffer),
-                }
+                EncodePass::Render(list, descriptor.to_owned())
+                    .schedule(queue, cmd_buffer, shared);
             }
         }
     }
@@ -1008,13 +1058,13 @@ impl CommandSink {
                 };
                 journal.passes.push((soft::Pass::Compute, range))
             }
-            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref capacity, .. } => {
+            CommandSink::Remote { ref queue, ref cmd_buffer, ref mut pass, ref capacity, ref shared, .. } => {
                 let mut list = Vec::with_capacity(capacity.compute);
                 list.extend(init_commands.map(soft::ComputeCommand::own));
                 let new_pass = EncodePass::Compute(list);
                 match door {
                     PassDoor::Open => *pass = Some(new_pass),
-                    PassDoor::Closed { .. } => new_pass.schedule(queue, cmd_buffer),
+                    PassDoor::Closed { .. } => new_pass.schedule(queue, cmd_buffer, shared),
                 }
             }
         }
@@ -1028,6 +1078,7 @@ pub struct IndexBuffer<B> {
     index_type: MTLIndexType,
 }
 
+#[derive(Default)]
 pub struct CommandBufferInner {
     sink: Option<CommandSink>,
     backup_journal: Option<Journal>,
@@ -1045,9 +1096,9 @@ impl Drop for CommandBufferInner {
 }
 
 impl CommandBufferInner {
-    pub(crate) fn reset(&mut self, shared: &Shared, release: bool) {
+    pub(crate) fn reset(&mut self, release: bool) {
         match self.sink.take() {
-            Some(CommandSink::Immediate { token, mut encoder_state, .. }) => {
+            Some(CommandSink::Immediate { token, mut encoder_state, shared, .. }) => {
                 encoder_state.end();
                 shared.queue.lock().release(token);
             }
@@ -1057,7 +1108,7 @@ impl CommandBufferInner {
                     self.backup_journal = Some(journal);
                 }
             }
-            Some(CommandSink::Remote { token, capacity, .. }) => {
+            Some(CommandSink::Remote { token, capacity, shared, .. }) => {
                 shared.queue.lock().release(token);
                 if !release {
                     self.backup_capacity = Some(capacity);
@@ -1123,11 +1174,14 @@ fn compute_pitches(
     (row_pitch, slice_pitch)
 }
 
-fn exec_render<R, C>(encoder: &metal::RenderCommandEncoderRef, command: C)
+fn exec_render<R, C>(
+    encoder: &metal::RenderCommandEncoderRef,
+    command: C,
+    shared: &Shared,
+)
 where
     R: soft::Resources,
     R::Data: Borrow<[u32]>,
-    R::DepthStencil: Borrow<metal::DepthStencilStateRef>,
     R::RenderPipeline: Borrow<metal::RenderPipelineStateRef>,
     C: Borrow<soft::RenderCommand<R>>,
 {
@@ -1145,8 +1199,9 @@ where
         Cmd::SetDepthBias(depth_bias) => {
             encoder.set_depth_bias(depth_bias.const_factor, depth_bias.slope_factor, depth_bias.clamp);
         }
-        Cmd::SetDepthStencilState(ref depth_stencil) => {
-            encoder.set_depth_stencil_state(depth_stencil.borrow());
+        Cmd::SetDepthStencilState(ref desc) => {
+            let state = shared.service_pipes.depth_stencil_states.get(desc.clone(), &shared.device);
+            encoder.set_depth_stencil_state(&**state);
         }
         Cmd::SetStencilReferenceValues(front, back) => {
             encoder.set_stencil_front_back_reference_value(front, back);
@@ -1402,6 +1457,63 @@ fn record_empty(command_buf: &metal::CommandBufferRef) {
     }
 }
 
+fn create_render_pass(
+    key: &native::RenderPassKey,
+    base_desc: &metal::RenderPassDescriptorRef,
+    attachments: &[Attachment],
+) -> metal::RenderPassDescriptor {
+    autoreleasepool(|| {
+        let mut clear_id = 0;
+        let mut num_colors = 0;
+        let rp_desc = unsafe {
+            let desc: metal::RenderPassDescriptor = msg_send![base_desc, copy];
+            msg_send![desc.as_ptr(), retain];
+            desc
+        };
+
+        for rat in attachments {
+            let (aspects, channel) = match rat.format {
+                Some(format) => (format.surface_desc().aspects, Channel::from(format.base_format().1)),
+                None => continue,
+            };
+            if aspects.contains(Aspects::COLOR) {
+                let color_desc = rp_desc
+                    .color_attachments()
+                    .object_at(num_colors)
+                    .unwrap();
+                if set_operations(color_desc, rat.ops) == AttachmentLoadOp::Clear {
+                    let d = &key.clear_data[clear_id .. clear_id + 4];
+                    clear_id += 4;
+                    let raw = com::ClearColorRaw {
+                        uint32: [d[0], d[1], d[2], d[3]],
+                    };
+                    color_desc.set_clear_color(channel.interpret(raw));
+                }
+                num_colors += 1;
+            }
+            if aspects.contains(Aspects::DEPTH) {
+                let depth_desc = rp_desc.depth_attachment().unwrap();
+                if set_operations(depth_desc, rat.ops) == AttachmentLoadOp::Clear {
+                    let raw = unsafe { *(&key.clear_data[clear_id] as *const _ as *const f32) };
+                    clear_id += 1;
+                    depth_desc.set_clear_depth(raw as f64);
+                }
+            }
+            if aspects.contains(Aspects::STENCIL) {
+                let stencil_desc = rp_desc.stencil_attachment().unwrap();
+                if set_operations(stencil_desc, rat.stencil_ops) == AttachmentLoadOp::Clear {
+                    let raw = key.clear_data[clear_id];
+                    clear_id += 1;
+                    stencil_desc.set_clear_stencil(raw);
+                }
+            }
+        }
+
+        rp_desc
+    })
+}
+
+
 #[derive(Default)]
 struct PerformanceCounters {
     immediate_command_buffers: usize,
@@ -1519,7 +1631,7 @@ impl RawCommandQueue<Backend> for CommandQueue {
                                     cmd_buffer.set_label("deferred");
                                     cmd_buffer
                                 });
-                            journal.record(&*cmd_buffer);
+                            journal.record(&*cmd_buffer, &self.shared);
                             if STITCH_DEFERRED_COMMAND_BUFFERS {
                                 deferred_cmd_buffer = Some(cmd_buffer);
                             }
@@ -1651,7 +1763,7 @@ impl pool::RawCommandPool<Backend> for CommandPool {
         for cmd_buffer in &self.allocated {
             cmd_buffer
                 .borrow_mut()
-                .reset(&self.shared, false);
+                .reset(false);
         }
     }
 
@@ -1664,13 +1776,7 @@ impl pool::RawCommandPool<Backend> for CommandPool {
         let buffers: Vec<_> = (0..num).map(|_| CommandBuffer {
             shared: Arc::clone(&self.shared),
             pool_shared: Arc::clone(&self.pool_shared),
-            inner: Arc::new(RefCell::new(CommandBufferInner {
-                sink: None,
-                backup_journal: None,
-                backup_capacity: None,
-                retained_buffers: Vec::new(),
-                retained_textures: Vec::new(),
-            })),
+            inner: Arc::new(RefCell::new(CommandBufferInner::default())),
             state: State {
                 viewport: None,
                 scissors: None,
@@ -1745,10 +1851,8 @@ impl CommandBuffer {
         let mut inner = self.inner.borrow_mut();
         let mut pre = inner.sink().pre_render();
         if !pre.is_void() {
-            let ds_store = &self.shared.service_pipes.depth_stencil_states;
             if let Some(desc) = self.state.build_depth_stencil() {
-                let state = &**ds_store.get(desc, &self.shared.device);
-                pre.issue(soft::RenderCommand::SetDepthStencilState(state));
+                pre.issue(soft::RenderCommand::SetDepthStencilState(desc));
             }
         }
     }
@@ -1768,6 +1872,7 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                     token,
                     encoder_state: EncoderState::None,
                     num_passes: 0,
+                    shared: Arc::clone(&self.shared),
                 }
             }
             OnlineRecording::Remote(_) if oneshot => {
@@ -1782,6 +1887,7 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                     token,
                     pass: None,
                     capacity: inner.backup_capacity.take().unwrap_or_default(),
+                    shared: Arc::clone(&self.shared),
                 }
             }
             _ => {
@@ -1806,7 +1912,7 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         self.state.reset_resources();
         self.inner
             .borrow_mut()
-            .reset(&self.shared, release_resources);
+            .reset(release_resources);
     }
 
     fn pipeline_barrier<'a, T>(
@@ -2061,8 +2167,8 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
 
                         sink.as_mut()
                             .unwrap()
-                            .begin_render_pass(
-                                PassDoor::Closed { label: "clear_image" },
+                            .begin_render_pass_internal(
+                                "clear_image",
                                 descriptor,
                                 iter::empty(),
                             );
@@ -2131,8 +2237,6 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         let mut vertex_is_dirty = true;
         let mut inner = self.inner.borrow_mut();
         let clear_pipes = &self.shared.service_pipes.clears;
-        let ds_store = &self.shared.service_pipes.depth_stencil_states;
-        let ds_state;
 
         //  issue a PSO+color switch and a draw for each requested clear
         let mut key = ClearKey {
@@ -2180,8 +2284,8 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                         //TODO: soft::RenderCommand::SetStencilReference
                         aspects |= Aspects::STENCIL;
                     }
-                    depth_stencil = ds_store.get_write(aspects);
-                    let com = soft::RenderCommand::SetDepthStencilState(&**depth_stencil);
+                    depth_stencil = self.shared.service_pipes.depth_stencil_states.get_write(aspects);
+                    let com = soft::RenderCommand::SetDepthStencilState(depth_stencil.clone());
                     (com, None)
                 }
             };
@@ -2228,16 +2332,9 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
 
         // reset all the affected states
         let (com_pso, com_rast) = self.state.make_pso_commands();
-
-        let device_lock = &self.shared.device;
-        let com_ds = match self.state.build_depth_stencil() {
-            Some(desc) => {
-                ds_state = ds_store.get(desc, device_lock);
-                Some(soft::RenderCommand::SetDepthStencilState(&**ds_state))
-            }
-            None => None,
-        };
-
+        let com_ds = self.state
+            .build_depth_stencil()
+            .map(soft::RenderCommand::SetDepthStencilState);
         let com_vs = self.state.resources_vs.buffers
             .first()
             .map(|&buffer| soft::RenderCommand::BindBuffer {
@@ -2295,7 +2392,6 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         vertices.clear();
 
         let sampler = self.shared.service_pipes.sampler_states.get(filter);
-        let ds_state;
         let key = (dst.mtl_type, dst.mtl_format, src.format_desc.aspects, dst.shader_channel);
         let pso = self.shared.service_pipes.blits.get(
             key,
@@ -2396,8 +2492,8 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         ];
 
         let com_ds = if src.format_desc.aspects.intersects(Aspects::DEPTH | Aspects::STENCIL) {
-            ds_state = self.shared.service_pipes.depth_stencil_states.get_write(src.format_desc.aspects);
-            Some(soft::RenderCommand::SetDepthStencilState(&**ds_state))
+            let ds_desc = self.shared.service_pipes.depth_stencil_states.get_write(src.format_desc.aspects);
+            Some(soft::RenderCommand::SetDepthStencilState(ds_desc.clone()))
         } else {
             None
         };
@@ -2489,8 +2585,8 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
 
                 inner
                     .sink()
-                    .begin_render_pass(
-                        PassDoor::Closed { label: "blit_image" },
+                    .begin_render_pass_internal(
+                        "blit_image",
                         &descriptor,
                         commands,
                     );
@@ -2669,27 +2765,20 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         T::Item: Borrow<com::ClearValueRaw>,
     {
         // FIXME: subpasses
-        let desc_guard;
         let (rp_key, full_aspects) = render_pass.build_key(clear_values);
 
         self.state.render_pso_is_compatible = match self.state.render_pso {
             Some(ref ps) => ps.at_formats.len() == render_pass.attachments.len() &&
-                ps.at_formats.iter().zip(&render_pass.attachments).all(|(f, at)| *f == at.format),
+                ps.at_formats.iter().zip(render_pass.attachments.iter()).all(|(f, at)| *f == at.format),
             _ => false
         };
 
         self.state.framebuffer_inner = framebuffer.inner.clone();
 
-        let ds_store = &self.shared.service_pipes.depth_stencil_states;
-        let ds_state;
         let com_ds = if full_aspects.intersects(Aspects::DEPTH | Aspects::STENCIL) {
-            match self.state.build_depth_stencil() {
-                Some(desc) => {
-                    ds_state = ds_store.get(desc, &self.shared.device);
-                    Some(soft::RenderCommand::SetDepthStencilState(&**ds_state))
-                },
-                None => None,
-            }
+            self.state
+                .build_depth_stencil()
+                .map(soft::RenderCommand::SetDepthStencilState)
         } else {
             None
         };
@@ -2697,61 +2786,16 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
             .make_render_commands(full_aspects)
             .chain(com_ds);
 
-        desc_guard = framebuffer.desc_storage
-            .get_or_create_with(&rp_key, || autoreleasepool(|| {
-                let mut clear_id = 0;
-                let mut num_colors = 0;
-                let rp_desc = unsafe {
-                    let desc: metal::RenderPassDescriptor = msg_send![framebuffer.descriptor, copy];
-                    msg_send![desc.as_ptr(), retain];
-                    desc
-                };
-
-                for rat in &render_pass.attachments {
-                    let (aspects, channel) = match rat.format {
-                        Some(format) => (format.surface_desc().aspects, Channel::from(format.base_format().1)),
-                        None => continue,
-                    };
-                    if aspects.contains(Aspects::COLOR) {
-                        let color_desc = rp_desc
-                            .color_attachments()
-                            .object_at(num_colors)
-                            .unwrap();
-                        if set_operations(color_desc, rat.ops) == AttachmentLoadOp::Clear {
-                            let d = &rp_key.clear_data[clear_id .. clear_id + 4];
-                            clear_id += 4;
-                            let raw = com::ClearColorRaw {
-                                uint32: [d[0], d[1], d[2], d[3]],
-                            };
-                            color_desc.set_clear_color(channel.interpret(raw));
-                        }
-                        num_colors += 1;
-                    }
-                    if aspects.contains(Aspects::DEPTH) {
-                        let depth_desc = rp_desc.depth_attachment().unwrap();
-                        if set_operations(depth_desc, rat.ops) == AttachmentLoadOp::Clear {
-                            let raw = unsafe { *(&rp_key.clear_data[clear_id] as *const _ as *const f32) };
-                            clear_id += 1;
-                            depth_desc.set_clear_depth(raw as f64);
-                        }
-                    }
-                    if aspects.contains(Aspects::STENCIL) {
-                        let stencil_desc = rp_desc.stencil_attachment().unwrap();
-                        if set_operations(stencil_desc, rat.stencil_ops) == AttachmentLoadOp::Clear {
-                            let raw = rp_key.clear_data[clear_id];
-                            clear_id += 1;
-                            stencil_desc.set_clear_stencil(raw);
-                        }
-                    }
-                }
-
-                rp_desc
-            }));
-
         self.inner
             .borrow_mut()
             .sink()
-            .begin_render_pass(PassDoor::Open, &**desc_guard, init_commands);
+            .begin_render_pass(
+                rp_key,
+                &framebuffer.desc_storage,
+                &framebuffer.descriptor,
+                &render_pass.attachments,
+                init_commands,
+            );
     }
 
     fn next_subpass(&mut self, _contents: com::SubpassContents) {
@@ -2830,9 +2874,7 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         }
 
         if let Some(desc) = self.state.build_depth_stencil() {
-            let ds_store = &self.shared.service_pipes.depth_stencil_states;
-            let state = &**ds_store.get(desc, &self.shared.device);
-            pre.issue(soft::RenderCommand::SetDepthStencilState(state));
+            pre.issue(soft::RenderCommand::SetDepthStencilState(desc));
         }
 
         if set_stencil_references {

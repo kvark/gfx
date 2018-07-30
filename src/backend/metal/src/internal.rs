@@ -178,8 +178,8 @@ impl DepthStencilStates {
         }
     }
 
-    pub fn get_write(&self, aspects: Aspects) -> FastStorageGuard<metal::DepthStencilState> {
-        let key = if aspects.contains(Aspects::DEPTH | Aspects::STENCIL) {
+    pub fn get_write(&self, aspects: Aspects) -> &pso::DepthStencilDesc {
+        if aspects.contains(Aspects::DEPTH | Aspects::STENCIL) {
             &self.write_all
         } else if aspects.contains(Aspects::DEPTH) {
             &self.write_depth
@@ -187,8 +187,7 @@ impl DepthStencilStates {
             &self.write_stencil
         } else {
             &self.write_none
-        };
-        self.map.get_or_create_with(key, || unreachable!())
+        }
     }
 
     pub fn prepare(&self, desc: &pso::DepthStencilDesc, device: &metal::DeviceRef) {

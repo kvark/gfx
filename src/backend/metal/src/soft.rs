@@ -1,32 +1,32 @@
 use {BufferPtr, SamplerPtr, TexturePtr};
 use command::IndexBuffer;
-use native::RasterizerState;
+use internal::FastStorageMap;
+use native::{RasterizerState, RenderPassKey};
 
 use hal;
 use metal;
 
 use std::ops::Range;
+use std::sync::Arc;
 
 
 pub trait Resources {
     type Data;
-    type DepthStencil;
     type RenderPipeline;
     type ComputePipeline;
 }
 
 #[derive(Debug)]
 pub enum Own {}
+
 impl Resources for Own {
     type Data = Vec<u32>;
-    type DepthStencil = metal::DepthStencilState;
     type RenderPipeline = metal::RenderPipelineState;
     type ComputePipeline = metal::ComputePipelineState;
 }
 
 impl<'a> Resources for &'a Own {
     type Data = &'a [u32];
-    type DepthStencil = &'a metal::DepthStencilStateRef;
     type RenderPipeline = &'a metal::RenderPipelineStateRef;
     type ComputePipeline = &'a metal::ComputePipelineStateRef;
 }
@@ -37,7 +37,7 @@ pub enum RenderCommand<R: Resources> {
     SetScissor(metal::MTLScissorRect),
     SetBlendColor(hal::pso::ColorValue),
     SetDepthBias(hal::pso::DepthBias),
-    SetDepthStencilState(R::DepthStencil),
+    SetDepthStencilState(hal::pso::DepthStencilDesc),
     SetStencilReferenceValues(hal::pso::StencilValue, hal::pso::StencilValue),
     SetRasterizerState(RasterizerState),
     BindBuffer {
@@ -239,7 +239,13 @@ impl<'a> ComputeCommand<&'a Own> {
 
 #[derive(Debug)]
 pub enum Pass {
-    Render(metal::RenderPassDescriptor),
+    Render {
+        key: RenderPassKey,
+        storage: Arc<FastStorageMap<RenderPassKey, metal::RenderPassDescriptor>>,
+        base_desc: metal::RenderPassDescriptor,
+        attachments: Arc<Vec<hal::pass::Attachment>>,
+    },
+    RenderInternal(metal::RenderPassDescriptor),
     Blit,
     Compute,
 }
