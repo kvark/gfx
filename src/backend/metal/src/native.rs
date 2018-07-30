@@ -670,6 +670,25 @@ pub enum DescriptorSet {
 unsafe impl Send for DescriptorSet {}
 unsafe impl Sync for DescriptorSet {}
 
+impl PartialEq for DescriptorSet {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (   &DescriptorSet::Emulated { ref layouts, .. },
+                &DescriptorSet::Emulated { layouts: ref other_layouts, .. }
+            ) => Arc::ptr_eq(layouts, other_layouts),
+            (   &DescriptorSet::Emulated {..},
+                &DescriptorSet::ArgumentBuffer {..}
+            ) => false,
+            (   &DescriptorSet::ArgumentBuffer {..},
+                &DescriptorSet::Emulated {..}
+            ) => false,
+            (   &DescriptorSet::ArgumentBuffer { ref raw, offset, .. },
+                &DescriptorSet::ArgumentBuffer { raw: ref other_raw, offset: other_offset, ..}
+            ) => raw.as_ptr() == other_raw.as_ptr() && offset == other_offset,
+        }
+    }
+}
+
 
 #[derive(Debug)]
 pub struct Memory {
