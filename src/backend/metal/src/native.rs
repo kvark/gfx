@@ -135,6 +135,17 @@ pub struct FramebufferInner {
     pub depth_stencil: Option<metal::MTLPixelFormat>,
 }
 
+impl Default for FramebufferInner {
+    fn default() -> Self {
+        FramebufferInner {
+            extent: image::Extent::default(),
+            aspects: Aspects::empty(),
+            colors: SmallVec::new(),
+            depth_stencil: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Framebuffer {
     pub(crate) descriptor: metal::RenderPassDescriptor,
@@ -224,6 +235,19 @@ pub struct StencilState<T> {
     pub back_read_mask: T,
     pub front_write_mask: T,
     pub back_write_mask: T,
+}
+
+impl Default for StencilState<pso::StencilValue> {
+    fn default() -> Self {
+        StencilState {
+            front_reference: 0,
+            back_reference: 0,
+            front_read_mask: !0,
+            back_read_mask: !0,
+            front_write_mask: !0,
+            back_write_mask: !0,
+        }
+    }
 }
 
 pub type VertexBufferMap = FastHashMap<(pso::BufferIndex, pso::ElemOffset), pso::VertexBufferDesc>;
@@ -398,10 +422,16 @@ impl HalDescriptorPool<Backend> for DescriptorPool {
 
                 // step[1]: count the total number of descriptors needed
                 let mut total = ResourceCounters::new();
-                let mut has_immutable_samplers = false;
+                let mut num_dynamic_offsets = 0;
+                let mut num_immutable_samplers = 0;
                 for layout in layouts.iter() {
                     total.add(layout.content);
-                    has_immutable_samplers |= layout.content.contains(DescriptorContent::IMMUTABLE_SAMPLER);
+                    if layout.content.contains(DescriptorContent::DYNAMIC_BUFFER) {
+                        num_dynamic_offsets += 1;
+                    }
+                    if layout.content.contains(DescriptorContent::IMMUTABLE_SAMPLER) {
+                        num_immutable_samplers += 1;
+                    }
                 }
                 debug!("\ttotal {:?}", total);
 
@@ -459,7 +489,7 @@ impl HalDescriptorPool<Backend> for DescriptorPool {
                 };
 
                 // step[3]: fill out immutable samplers
-                if has_immutable_samplers {
+                if num_immutable_samplers != 0 {
                     let mut data = inner.write();
                     let mut sampler_offset = sampler_range.start as usize;
 
@@ -481,6 +511,7 @@ impl HalDescriptorPool<Backend> for DescriptorPool {
                     sampler_range,
                     texture_range,
                     buffer_range,
+                    num_dynamic_offsets,
                 })
             }
             DescriptorPool::ArgumentBuffer { ref raw, ref mut range_allocator, } => {
@@ -650,15 +681,16 @@ pub enum DescriptorSetLayout {
 unsafe impl Send for DescriptorSetLayout {}
 unsafe impl Sync for DescriptorSetLayout {}
 
-
-#[derive(Debug)]
+//TODO: remove Clone, it's only needed for the command buffer state
+#[derive(Clone, Debug)]
 pub enum DescriptorSet {
     Emulated {
         pool: Arc<RwLock<DescriptorPoolInner>>,
         layouts: Arc<Vec<DescriptorLayout>>,
         sampler_range: Range<pso::DescriptorBinding>,
         texture_range: Range<pso::DescriptorBinding>,
-        buffer_range: Range<pso::DescriptorBinding>
+        buffer_range: Range<pso::DescriptorBinding>,
+        num_dynamic_offsets: usize,
     },
     ArgumentBuffer {
         raw: metal::Buffer,

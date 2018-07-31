@@ -1403,7 +1403,7 @@ impl hal::Device<Backend> for Device {
         debug!("write_descriptor_sets");
         for write in write_iter {
             match *write.set {
-                n::DescriptorSet::Emulated { ref pool, ref layouts, ref sampler_range, ref texture_range, ref buffer_range } => {
+                n::DescriptorSet::Emulated { ref pool, ref layouts, ref sampler_range, ref texture_range, ref buffer_range, .. } => {
                     let mut counters = n::ResourceCounters {
                         buffers: buffer_range.start as usize,
                         textures: texture_range.start as usize,
@@ -1964,7 +1964,7 @@ impl hal::Device<Backend> for Device {
     fn reset_fence(&self, fence: &n::Fence) {
         *fence.0.borrow_mut() = n::FenceInner::Idle { signaled: false };
     }
-    fn wait_for_fence(&self, fence: &n::Fence, mut timeout_ns: u64) -> bool {
+    fn wait_for_fence(&self, fence: &n::Fence, timeout_ns: u64) -> bool {
         fn to_ns(duration: time::Duration) -> u64 {
             duration.as_secs() * 1_000_000_000 + duration.subsec_nanos() as u64
         }
