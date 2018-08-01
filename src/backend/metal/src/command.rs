@@ -254,27 +254,27 @@ impl ActiveDescriptorSet<native::MultiStageResourceCounters> {
                     };
 
                     let (bv, bf) = if layout.content.contains(native::DescriptorContent::BUFFER) {
-                        let mut buffer = data.buffers[data_offset.buffers].clone();
+                        let buffer = data.buffers[data_offset.buffers].clone();
                         data_offset.buffers += 1;
-                        if layout.content.contains(native::DescriptorContent::DYNAMIC_BUFFER) {
-                            if let Some((_, ref mut offset)) = buffer {
-                                let index = self.dynamic_offsets.start + layout.associated_data_index;
-                                debug_assert!(index < self.dynamic_offsets.end);
-                                *offset += dynamic_offsets[index as usize] as u64;
-                            }
-                        }
+                        let extra_offset = if layout.content.contains(native::DescriptorContent::DYNAMIC_BUFFER) {
+                            let index = self.dynamic_offsets.start + layout.associated_data_index;
+                            debug_assert!(index < self.dynamic_offsets.end);
+                            dynamic_offsets[index as usize]
+                        } else {
+                            0
+                        };
 
                         let bv = if layout.stages.contains(pso::ShaderStageFlags::VERTEX) {
                             let index = res_offset.vs.buffers;
                             res_offset.vs.buffers += 1;
-                            Some(soft::RenderCommand::BindBuffer { stage: pso::Stage::Vertex, index, buffer })
+                            Some(soft::RenderCommand::BindBuffer { stage: pso::Stage::Vertex, index, buffer, extra_offset })
                         } else {
                             None
                         };
                         let bf = if layout.stages.contains(pso::ShaderStageFlags::FRAGMENT) {
                             let index = res_offset.ps.buffers;
                             res_offset.ps.buffers += 1;
-                            Some(soft::RenderCommand::BindBuffer { stage: pso::Stage::Fragment, index, buffer })
+                            Some(soft::RenderCommand::BindBuffer { stage: pso::Stage::Fragment, index, buffer, extra_offset })
                         } else {
                             None
                         };
@@ -342,17 +342,19 @@ impl ActiveDescriptorSet<native::ResourceCounters> {
                     let bc = if layout.content.contains(native::DescriptorContent::BUFFER) &&
                         layout.stages.contains(pso::ShaderStageFlags::COMPUTE)
                     {
-                        let mut buffer = data.buffers[data_offset.buffers].clone();
-                        if layout.content.contains(native::DescriptorContent::DYNAMIC_BUFFER) {
-                            if let Some((_, ref mut offset)) = buffer {
+                        let com = soft::ComputeCommand::BindBuffer {
+                            index: res_offset.buffers,
+                            buffer: data.buffers[data_offset.buffers],
+                            extra_offset: if layout.content.contains(native::DescriptorContent::DYNAMIC_BUFFER) {
                                 let index = self.dynamic_offsets.start + layout.associated_data_index;
                                 debug_assert!(index < self.dynamic_offsets.end);
-                                *offset += dynamic_offsets[index as usize] as u64;
-                            }
-                        }
-                        let index = res_offset.buffers;
+                                dynamic_offsets[index as usize]
+                            } else {
+                                0
+                            },
+                        };
                         res_offset.buffers += 1;
-                        Some(soft::ComputeCommand::BindBuffer { index, buffer })
+                        Some(com)
                     } else {
                         None
                     };
@@ -553,8 +555,8 @@ impl State {
                 soft::RenderCommand::BindBuffer {
                     stage: pso::Stage::Vertex,
                     index: vb.binding as usize,
-                    buffer: vertex_buffers[binding as usize]
-                        .map(|(buffer, offset)| (buffer, offset + extra_offset as u64))
+                    buffer: vertex_buffers[binding as usize],
+                    extra_offset,
                 }
             });
         Some(iter)
@@ -1261,9 +1263,9 @@ fn exec_render<'a>(encoder: &metal::RenderCommandEncoderRef, command: soft::Rend
             encoder.set_cull_mode(rs.cull_mode);
             encoder.set_depth_clip_mode(rs.depth_clip);
         }
-        Cmd::BindBuffer { stage, index, buffer } => {
+        Cmd::BindBuffer { stage, index, buffer, extra_offset } => {
             let (native, offset) = match buffer {
-                Some((ref ptr, offset)) => (Some(ptr.as_native()), offset),
+                Some((ref ptr, offset)) => (Some(ptr.as_native()), offset + extra_offset as buffer::Offset),
                 None => (None, 0),
             };
             match stage {
@@ -1457,9 +1459,9 @@ fn exec_blit<'a>(encoder: &metal::BlitCommandEncoderRef, command: soft::BlitComm
 fn exec_compute<'a>(encoder: &metal::ComputeCommandEncoderRef, command: soft::ComputeCommand<&'a soft::Own>) {
     use soft::ComputeCommand as Cmd;
     match command {
-        Cmd::BindBuffer { index, buffer } => {
+        Cmd::BindBuffer { index, buffer, extra_offset } => {
             let (native, offset) = match buffer {
-                Some((ref ptr, offset)) => (Some(ptr.as_native()), offset),
+                Some((ref ptr, offset)) => (Some(ptr.as_native()), offset + extra_offset as buffer::Offset),
                 None => (None, 0),
             };
             encoder.set_buffer(index as _, offset, native);
@@ -1949,6 +1951,7 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
             soft::ComputeCommand::BindBuffer {
                 index: 0,
                 buffer: Some((BufferPtr(buffer.raw.as_ptr()), start)),
+                extra_offset: 0,
             },
             soft::ComputeCommand::BindBufferData {
                 index: 1,
@@ -2329,8 +2332,8 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
             .map(|(&(binding, extra_offset), _)| soft::RenderCommand::BindBuffer {
                 stage: pso::Stage::Vertex,
                 index: SPECIAL_BUFFER_INDEX,
-                buffer: vertex_buffers[binding as usize]
-                    .map(|(buffer, offset)| (buffer, offset + extra_offset as u64)),
+                buffer: vertex_buffers[binding as usize],
+                extra_offset,
             });
 
         // Note: this is the trickiest part: go through active descriptor sets and re-bind the buffer index = 0
@@ -2358,26 +2361,36 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                             continue
                         }
 
-                        let mut buffer = data.buffers[data_offset].clone();
+                        let buffer = data.buffers[data_offset].clone();
                         data_offset += 1;
-                        if layout.content.contains(native::DescriptorContent::DYNAMIC_BUFFER) {
-                            if let Some((_, ref mut offset)) = buffer {
-                                let index = active_desc.dynamic_offsets.start + layout.associated_data_index;
-                                *offset += self.state.dynamic_offsets[index as usize] as u64;
-                            }
-                        }
+                        let extra_offset = if layout.content.contains(native::DescriptorContent::DYNAMIC_BUFFER) {
+                            let index = active_desc.dynamic_offsets.start + layout.associated_data_index;
+                            self.state.dynamic_offsets[index as usize]
+                        } else {
+                            0
+                        };
 
                         if com_vs_buf.is_none() &&
                             layout.stages.contains(pso::ShaderStageFlags::VERTEX) &&
                             active_desc.resource_offsets.vs.buffers == SPECIAL_BUFFER_INDEX
                         {
-                            com_vs_buf = Some(soft::RenderCommand::BindBuffer { stage: pso::Stage::Vertex, index: SPECIAL_BUFFER_INDEX, buffer });
+                            com_vs_buf = Some(soft::RenderCommand::BindBuffer {
+                                stage: pso::Stage::Vertex,
+                                index: SPECIAL_BUFFER_INDEX,
+                                buffer,
+                                extra_offset,
+                            });
                         }
                         if com_ps_buf.is_none() &&
                             layout.stages.contains(pso::ShaderStageFlags::FRAGMENT) &&
                             active_desc.resource_offsets.ps.buffers == SPECIAL_BUFFER_INDEX
                         {
-                            com_ps_buf = Some(soft::RenderCommand::BindBuffer { stage: pso::Stage::Fragment, index: SPECIAL_BUFFER_INDEX, buffer });
+                            com_ps_buf = Some(soft::RenderCommand::BindBuffer {
+                                stage: pso::Stage::Fragment,
+                                index: SPECIAL_BUFFER_INDEX,
+                                buffer,
+                                extra_offset,
+                            });
                         }
                     }
                 }
@@ -3197,10 +3210,12 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                 compute_commands.push(soft::ComputeCommand::BindBuffer {
                     index: 0,
                     buffer: Some((BufferPtr(dst.raw.as_ptr()), r.dst)),
+                    extra_offset: 0,
                 });
                 compute_commands.push(soft::ComputeCommand::BindBuffer {
                     index: 1,
                     buffer: Some((BufferPtr(src.raw.as_ptr()), r.src)),
+                    extra_offset: 0,
                 });
                 compute_commands.push(soft::ComputeCommand::BindBufferData {
                     index: 2,
