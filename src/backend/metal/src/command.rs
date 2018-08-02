@@ -400,6 +400,9 @@ struct State {
     push_constants_cs_buffer_id: Option<u32>,
     vertex_buffers: Vec<Option<(BufferPtr, u64)>>,
     framebuffer_inner: native::FramebufferInner,
+    dirty_vertex_buffers: Range<u32>,
+    dirty_graphics_descriptor_sets: Range<pso::DescriptorSetIndex>,
+    dirty_compute_descriptor_sets: Range<pso::DescriptorSetIndex>,
 }
 
 impl State {
@@ -425,6 +428,9 @@ impl State {
         self.push_constants_cs_buffer_id = None;
         self.vertex_buffers.clear();
         self.framebuffer_inner = native::FramebufferInner::default();
+        self.dirty_vertex_buffers = 0 .. 0;
+        self.dirty_graphics_descriptor_sets = 0 .. 0;
+        self.dirty_compute_descriptor_sets = 0 .. 0;
     }
 
     fn clamp_scissor(sr: MTLScissorRect, extent: Extent) -> MTLScissorRect {
@@ -437,20 +443,6 @@ impl State {
             y,
             width: ((sr.x + sr.width).min(extent.width as u64) - x).max(1),
             height: ((sr.y + sr.height).min(extent.height as u64) - y).max(1),
-        }
-    }
-
-    fn make_pso_commands<'a>(
-        &'a self
-    ) -> (Option<soft::RenderCommand<&'a soft::Own>>, Option<soft::RenderCommand<&'a soft::Own>>){
-        if self.render_pso_is_compatible {
-            (
-                self.render_pso.as_ref().map(|ps| soft::RenderCommand::BindPipeline(&*ps.raw)),
-                self.rasterizer_state.clone().map(soft::RenderCommand::SetRasterizerState),
-            )
-        } else {
-            // Note: this is technically valid, we should not warn.
-            (None, None)
         }
     }
 
@@ -472,21 +464,17 @@ impl State {
         } else {
             None
         };
-        let (com_pso, com_rast) = self.make_pso_commands();
 
-        let dynamic_offsets = &self.dynamic_offsets;
-        let com_resources = self.graphics_descriptor_sets
-            .iter()
-            .filter_map(Option::as_ref)
-            .flat_map(move |active_desc| {
-                active_desc.bind_to_graphics(dynamic_offsets, false)
-            });
-
-        let vbuf_range = 0 .. self.vertex_buffers.len() as u32;
-        let com_vertex_buffers = self
-            .set_vertex_buffers(vbuf_range)
-            .into_iter()
-            .flat_map(|commands| commands);
+        let com_pso = if self.render_pso_is_compatible {
+            self.render_pso.as_ref().map(|ps| soft::RenderCommand::BindPipeline(&*ps.raw))
+        } else {
+            None
+        };
+        let com_rast = if self.render_pso_is_compatible {
+            self.rasterizer_state.clone().map(soft::RenderCommand::SetRasterizerState)
+        } else {
+            None
+        };
 
         let com_vs_push_constants = self.push_constants_vs_buffer_id
             .map(|id| soft::RenderCommand::BindBufferData {
@@ -501,16 +489,13 @@ impl State {
                 words: self.push_constants.as_slice(),
             });
 
-        com_vp
+        com_pso
             .into_iter()
+            .chain(com_rast)
+            .chain(com_vp)
             .chain(com_scissor)
             .chain(com_blend)
             .chain(com_depth_bias)
-            .chain(com_pso)
-            .chain(com_rast)
-            //.chain(com_ds) // done outside
-            .chain(com_resources)
-            .chain(com_vertex_buffers)
             .chain(com_vs_push_constants)
             .chain(com_ps_push_constants)
     }
@@ -544,8 +529,8 @@ impl State {
         &self, range: Range<u32>
     ) -> Option<impl Iterator<Item = soft::RenderCommand<&soft::Own>>> {
         let map = match self.render_pso {
-            Some(ref ps) => &ps.vbuf_map,
-            None => return None
+            Some(ref ps) if self.render_pso_is_compatible => &ps.vbuf_map,
+            _ => return None
         };
         let vertex_buffers = &self.vertex_buffers;
         let iter = map
@@ -674,6 +659,35 @@ impl State {
             data.push(0);
         }
         data[offset .. offset + constants.len()].copy_from_slice(constants);
+    }
+
+    fn mark_dirty_vertex_buffers(&mut self, range: Range<u32>) {
+        self.dirty_vertex_buffers =
+            self.dirty_vertex_buffers.start.min(range.start) ..
+            self.dirty_vertex_buffers.end.max(range.end);
+    }
+
+    fn mark_dirty_graphics_descriptor_sets(&mut self) {
+        self.dirty_graphics_descriptor_sets = 0 .. self.graphics_descriptor_sets.len() as pso::DescriptorSetIndex;
+    }
+
+    fn pre_draw(&mut self) -> impl Iterator<Item = soft::RenderCommand<&soft::Own>> {
+        let vbuf_range = mem::replace(&mut self.dirty_vertex_buffers, 0 .. 0);
+        let dset_range =
+            self.dirty_graphics_descriptor_sets.start as usize ..
+            self.dirty_graphics_descriptor_sets.end as usize;
+        self.dirty_graphics_descriptor_sets = 0 .. 0;
+
+        let dynamic_offsets = &self.dynamic_offsets;
+        let dset_updates = self.graphics_descriptor_sets[dset_range]
+            .iter()
+            .filter_map(Option::as_ref)
+            .flat_map(move |active_desc| active_desc.bind_to_graphics(dynamic_offsets, false));
+
+        self.set_vertex_buffers(vbuf_range)
+            .into_iter()
+            .flat_map(|coms| coms)
+            .chain(dset_updates)
     }
 }
 
@@ -839,22 +853,6 @@ impl<'a> PreRender<'a> {
             PreRender::Immediate(encoder) => exec_render(encoder, command),
             PreRender::Deferred(ref mut list) => list.push(command.own()),
             PreRender::Void => (),
-        }
-    }
-    fn issue_many<'b, I>(&mut self, commands: I)
-    where
-        I: Iterator<Item = soft::RenderCommand<&'b soft::Own>>
-    {
-        match *self {
-            PreRender::Immediate(encoder) => {
-                for com in commands {
-                    exec_render(encoder, com);
-                }
-            }
-            PreRender::Deferred(ref mut list) => {
-                list.extend(commands.map(soft::RenderCommand::own));
-            }
-            PreRender::Void => {}
         }
     }
 }
@@ -1785,6 +1783,9 @@ impl pool::RawCommandPool<Backend> for CommandPool {
                 push_constants_cs_buffer_id: None,
                 vertex_buffers: Vec::new(),
                 framebuffer_inner: native::FramebufferInner::default(),
+                dirty_vertex_buffers: 0 .. 0,
+                dirty_graphics_descriptor_sets: 0 .. 0,
+                dirty_compute_descriptor_sets: 0 .. 0,
             },
             temp: Temp {
                 clear_vertices: Vec::new(),
@@ -1823,6 +1824,7 @@ fn set_operations(attachment: &metal::RenderPassAttachmentDescriptorRef, ops: At
 }
 
 impl CommandBuffer {
+    #[inline]
     fn update_depth_stencil(&self) {
         let mut inner = self.inner.borrow_mut();
         let mut pre = inner.sink().pre_render();
@@ -2311,104 +2313,29 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         }
 
         // reset all the affected states
-        let (com_pso, com_rast) = self.state.make_pso_commands();
+        if self.state.render_pso_is_compatible {
+            let num_vertex_buffers = self.state.vertex_buffers.len();
+            self.state.mark_dirty_vertex_buffers(0 .. num_vertex_buffers as u32);
+            self.state.mark_dirty_graphics_descriptor_sets();
 
-        let device_lock = &self.shared.device;
-        let com_ds = match self.state.build_depth_stencil() {
-            Some(desc) => {
-                ds_state = ds_store.get(desc, device_lock);
-                Some(soft::RenderCommand::SetDepthStencilState(&**ds_state))
-            }
-            None => None,
-        };
+            let com_pso = self.state.render_pso.as_ref().map(|ps| soft::RenderCommand::BindPipeline(&*ps.raw));
+            let com_rast = self.state.rasterizer_state.clone().map(soft::RenderCommand::SetRasterizerState);
 
-        let vertex_buffers = &self.state.vertex_buffers;
-        let mut com_vs_buf = self.state.render_pso
-            .as_ref()
-            .unwrap()
-            .vbuf_map
-            .iter()
-            .find(|(_, ref vb)| vb.binding as usize == SPECIAL_BUFFER_INDEX)
-            .map(|(&(binding, extra_offset), _)| soft::RenderCommand::BindBuffer {
-                stage: pso::Stage::Vertex,
-                index: SPECIAL_BUFFER_INDEX,
-                buffer: vertex_buffers[binding as usize],
-                extra_offset,
-            });
-
-        // Note: this is the trickiest part: go through active descriptor sets and re-bind the buffer index = 0
-        // Note2: this piece of code doesn't really work for any other values of SPECIAL_BUFFER_INDEX
-        let mut com_ps_buf = None;
-        for active_desc_maybe in &self.state.graphics_descriptor_sets {
-            let active_desc = match active_desc_maybe {
-                Some(ref active_desc) => active_desc,
-                None => continue,
-            };
-            if active_desc.resource_offsets.vs.buffers > SPECIAL_BUFFER_INDEX && active_desc.resource_offsets.ps.buffers > SPECIAL_BUFFER_INDEX {
-                continue
-            }
-
-            match active_desc.set {
-                native::DescriptorSet::Emulated { ref pool, ref layouts, ref buffer_range, .. } => {
-                    if buffer_range.start == buffer_range.end {
-                        continue
-                    }
-                    let mut data_offset = buffer_range.start as usize;
-                    let data = pool.read();
-
-                    for layout in layouts.iter() {
-                        if !layout.content.contains(native::DescriptorContent::BUFFER) {
-                            continue
-                        }
-
-                        let buffer = data.buffers[data_offset].clone();
-                        data_offset += 1;
-                        let extra_offset = if layout.content.contains(native::DescriptorContent::DYNAMIC_BUFFER) {
-                            let index = active_desc.dynamic_offsets.start + layout.associated_data_index;
-                            self.state.dynamic_offsets[index as usize]
-                        } else {
-                            0
-                        };
-
-                        if com_vs_buf.is_none() &&
-                            layout.stages.contains(pso::ShaderStageFlags::VERTEX) &&
-                            active_desc.resource_offsets.vs.buffers == SPECIAL_BUFFER_INDEX
-                        {
-                            com_vs_buf = Some(soft::RenderCommand::BindBuffer {
-                                stage: pso::Stage::Vertex,
-                                index: SPECIAL_BUFFER_INDEX,
-                                buffer,
-                                extra_offset,
-                            });
-                        }
-                        if com_ps_buf.is_none() &&
-                            layout.stages.contains(pso::ShaderStageFlags::FRAGMENT) &&
-                            active_desc.resource_offsets.ps.buffers == SPECIAL_BUFFER_INDEX
-                        {
-                            com_ps_buf = Some(soft::RenderCommand::BindBuffer {
-                                stage: pso::Stage::Fragment,
-                                index: SPECIAL_BUFFER_INDEX,
-                                buffer,
-                                extra_offset,
-                            });
-                        }
-                    }
+            let device_lock = &self.shared.device;
+            let com_ds = match self.state.build_depth_stencil() {
+                Some(desc) => {
+                    ds_state = ds_store.get(desc, device_lock);
+                    Some(soft::RenderCommand::SetDepthStencilState(&**ds_state))
                 }
-                native::DescriptorSet::ArgumentBuffer { .. } => unimplemented!(),
-            }
+                None => None,
+            };
 
-            if com_vs_buf.is_some() && com_ps_buf.is_some() {
-                break
-            }
+            let commands = com_pso
+                .into_iter()
+                .chain(com_rast)
+                .chain(com_ds);
+            inner.sink().render_commands(commands);
         }
-
-        let commands = com_pso
-            .into_iter()
-            .chain(com_rast)
-            .chain(com_ds)
-            .chain(com_vs_buf)
-            .chain(com_ps_buf);
-        inner.sink().render_commands(commands);
 
         vertices.clear();
     }
@@ -2681,13 +2608,7 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
             last += 1;
         }
 
-        if let Some(commands) = self.state.set_vertex_buffers(first_binding .. last as u32) {
-            self.inner
-                .borrow_mut()
-                .sink()
-                .pre_render()
-                .issue_many(commands);
-        }
+        self.state.mark_dirty_vertex_buffers(first_binding .. last as u32);
     }
 
     fn set_viewports<T>(&mut self, first_viewport: u32, vps: T)
@@ -2826,6 +2747,9 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         };
 
         self.state.framebuffer_inner = framebuffer.inner.clone();
+        let num_vertex_buffers = self.state.vertex_buffers.len() as u32;
+        self.state.mark_dirty_vertex_buffers(0 .. num_vertex_buffers);
+        self.state.mark_dirty_graphics_descriptor_sets();
 
         let ds_store = &self.shared.service_pipes.depth_stencil_states;
         let ds_state;
@@ -2937,6 +2861,10 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
             }
         }
 
+        let num_vertex_buffers = self.state.vertex_buffers.len() as u32;
+        self.state.mark_dirty_vertex_buffers(0 .. num_vertex_buffers);
+        self.state.mark_dirty_graphics_descriptor_sets();
+
         let mut inner = self.inner.borrow_mut();
         let mut pre = inner.sink().pre_render();
 
@@ -3002,12 +2930,6 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         if let Some(ref color) = pipeline.baked_states.blend_color {
             pre.issue(self.state.set_blend_color(color));
         }
-
-        // re-bind vertex buffers
-        let vbuf_range = 0 .. self.state.vertex_buffers.len() as u32;
-        if let Some(commands) = self.state.set_vertex_buffers(vbuf_range) {
-            pre.issue_many(commands);
-        }
     }
 
     fn bind_graphics_descriptor_sets<'a, I, J>(
@@ -3025,9 +2947,6 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         let mut offset_base = self.state.dynamic_offsets.len();
         self.state.dynamic_offsets.extend(dynamic_offsets.into_iter().map(|off| *off.borrow()));
         assert!(self.state.dynamic_offsets.len() < 0x10000);
-
-        let mut inner = self.inner.borrow_mut();
-        let mut pre = inner.sink().pre_render();
 
         for (i, (res_offset, descriptor_set)) in pipe_layout.offsets[first_set ..].iter().zip(sets).enumerate() {
             while first_set + i >= self.state.graphics_descriptor_sets.len() {
@@ -3051,13 +2970,16 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                     }
                     assert!(!same_set || num_dynamic_offsets != 0);
 
-                    let active_desc = ActiveDescriptorSet {
+                    *out_desc = Some(ActiveDescriptorSet {
                         set: desc_set.clone(),
                         dynamic_offsets: (offset_base - num_dynamic_offsets) as u16 .. offset_base as u16,
                         resource_offsets: res_offset.clone(),
-                    };
-                    pre.issue_many(active_desc.bind_to_graphics(&self.state.dynamic_offsets, same_set));
-                    *out_desc = Some(active_desc);
+                    });
+
+                    let index = (first_set + i) as pso::DescriptorSetIndex;
+                    self.state.dirty_graphics_descriptor_sets =
+                        self.state.dirty_graphics_descriptor_sets.start.min(index) ..
+                        self.state.dirty_graphics_descriptor_sets.end.max(index + 1);
                 }
                 native::DescriptorSet::ArgumentBuffer { .. } => unimplemented!(),
             }
@@ -3067,6 +2989,11 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
     fn bind_compute_pipeline(&mut self, pipeline: &native::ComputePipeline) {
         self.state.compute_pso = Some(pipeline.raw.clone());
         self.state.work_group_size = pipeline.work_group_size;
+
+        // unbind all resources
+        for active_desc in &mut self.state.compute_descriptor_sets {
+            *active_desc = None;
+        }
 
         let command = soft::ComputeCommand::BindPipeline(&*pipeline.raw);
         self.inner
@@ -3091,9 +3018,6 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         let mut offset_base = self.state.dynamic_offsets.len();
         self.state.dynamic_offsets.extend(dynamic_offsets.into_iter().map(|off| *off.borrow()));
 
-        let mut inner = self.inner.borrow_mut();
-        let mut pre = inner.sink().pre_compute();
-
         for (i, (res_offset, descriptor_set)) in pipe_layout.offsets[first_set ..].iter().zip(sets).enumerate() {
             while first_set + i >= self.state.compute_descriptor_sets.len() {
                 self.state.compute_descriptor_sets.push(None);
@@ -3115,13 +3039,16 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                     }
                     assert!(!same_set || num_dynamic_offsets != 0);
 
-                    let active_desc = ActiveDescriptorSet {
+                    *out_desc = Some(ActiveDescriptorSet {
                         set: descriptor_set.borrow().clone(),
                         dynamic_offsets: (offset_base - num_dynamic_offsets) as u16 .. offset_base as u16,
                         resource_offsets: res_offset.cs.clone(),
-                    };
-                    pre.issue_many(active_desc.bind_to_compute(&self.state.dynamic_offsets, same_set));
-                    *out_desc = Some(active_desc);
+                    });
+
+                    let index = (first_set + i) as pso::DescriptorSetIndex;
+                    self.state.dirty_compute_descriptor_sets =
+                        self.state.dirty_compute_descriptor_sets.start.min(index) ..
+                        self.state.dirty_compute_descriptor_sets.end.max(index + 1);
                 }
                 native::DescriptorSet::ArgumentBuffer { .. } => {
                     unimplemented!()
@@ -3341,15 +3268,20 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
             return
         }
 
-        let command = soft::RenderCommand::Draw {
+        let com = soft::RenderCommand::Draw {
             primitive_type: self.state.primitive_type,
             vertices,
             instances,
         };
+
+        let commands = self.state
+            .pre_draw()
+            .chain(iter::once(com));
+
         self.inner
             .borrow_mut()
             .sink()
-            .render_commands(iter::once(command));
+            .render_commands(commands);
     }
 
     fn draw_indexed(
@@ -3362,17 +3294,22 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
             return
         }
 
-        let command = soft::RenderCommand::DrawIndexed {
+        let com = soft::RenderCommand::DrawIndexed {
             primitive_type: self.state.primitive_type,
             index: self.state.index_buffer.expect("must bind index buffer"),
             indices,
             base_vertex,
             instances,
         };
+
+        let commands = self.state
+            .pre_draw()
+            .chain(iter::once(com));
+
         self.inner
             .borrow_mut()
             .sink()
-            .render_commands(iter::once(command));
+            .render_commands(commands);
     }
 
     fn draw_indirect(
@@ -3385,12 +3322,17 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         assert_eq!(offset % WORD_ALIGNMENT, 0);
         assert_eq!(stride % WORD_ALIGNMENT as u32, 0);
 
-        let commands = (0 .. count)
-            .map(|i| soft::RenderCommand::DrawIndirect {
-                primitive_type: self.state.primitive_type,
+        let primitive_type = self.state.primitive_type;
+        let coms = (0 .. count)
+            .map(move |i| soft::RenderCommand::DrawIndirect {
+                primitive_type,
                 buffer: BufferPtr(buffer.raw.as_ptr()),
                 offset: offset + (i * stride) as buffer::Offset,
             });
+
+        let commands = self.state
+            .pre_draw()
+            .chain(coms);
 
         self.inner
             .borrow_mut()
@@ -3408,13 +3350,19 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
         assert_eq!(offset % WORD_ALIGNMENT, 0);
         assert_eq!(stride % WORD_ALIGNMENT as u32, 0);
 
-        let commands = (0 .. count)
-            .map(|i| soft::RenderCommand::DrawIndexedIndirect {
-                primitive_type: self.state.primitive_type,
-                index: self.state.index_buffer.expect("must bind index buffer"),
+        let primitive_type = self.state.primitive_type;
+        let index = self.state.index_buffer.expect("must bind index buffer");
+        let coms = (0 .. count)
+            .map(move |i| soft::RenderCommand::DrawIndexedIndirect {
+                primitive_type,
+                index,
                 buffer: BufferPtr(buffer.raw.as_ptr()),
                 offset: offset + (i * stride) as buffer::Offset,
             });
+
+        let commands = self.state
+            .pre_draw()
+            .chain(coms);
 
         self.inner
             .borrow_mut()
