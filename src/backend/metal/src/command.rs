@@ -183,6 +183,7 @@ struct RenderPipelineState {
     ds_desc: pso::DepthStencilDesc,
     vbuf_map: native::VertexBufferMap,
     at_formats: Vec<Option<Format>>,
+    num_descriptor_sets: usize,
 }
 
 #[derive(Clone)]
@@ -201,6 +202,7 @@ impl ActiveDescriptorSet<native::MultiStageResourceCounters> {
         match self.set {
             native::DescriptorSet::Emulated { ref pool, ref layouts, ref sampler_range, ref texture_range, ref buffer_range, .. } => {
                 let mut res_offset = self.resource_offsets.clone();
+                //println!("\tbind_to_graphics data buffer range {:?}, offsets {:?}", buffer_range, res_offset.vs);
                 let data = pool.read();
                 let mut data_offset = native::ResourceCounters {
                     buffers: buffer_range.start as usize,
@@ -266,6 +268,7 @@ impl ActiveDescriptorSet<native::MultiStageResourceCounters> {
 
                         let bv = if layout.stages.contains(pso::ShaderStageFlags::VERTEX) {
                             let index = res_offset.vs.buffers;
+                            //println!("\t\tbuffer VS[{}] = {:?}", index, buffer);
                             res_offset.vs.buffers += 1;
                             Some(soft::RenderCommand::BindBuffer { stage: pso::Stage::Vertex, index, buffer, extra_offset })
                         } else {
@@ -273,6 +276,7 @@ impl ActiveDescriptorSet<native::MultiStageResourceCounters> {
                         };
                         let bf = if layout.stages.contains(pso::ShaderStageFlags::FRAGMENT) {
                             let index = res_offset.ps.buffers;
+                            //println!("\t\tbuffer PS[{}] = {:?}", index, buffer);
                             res_offset.ps.buffers += 1;
                             Some(soft::RenderCommand::BindBuffer { stage: pso::Stage::Fragment, index, buffer, extra_offset })
                         } else {
@@ -532,11 +536,13 @@ impl State {
             Some(ref ps) if self.render_pso_is_compatible => &ps.vbuf_map,
             _ => return None
         };
+        //println!("\tset_vertex_buffers");
         let vertex_buffers = &self.vertex_buffers;
         let iter = map
             .iter()
-            .filter(move |(&(binding, _), _)| range.start <= binding && binding < range.end)
+            .filter(move |(&(binding, _), _)| range.start <= binding && binding < range.end) //TEMP
             .map(move |(&(binding, extra_offset), vb)| {
+                //println!("\t\tvbuf at {} = {:?}", vb.binding, vertex_buffers[binding as usize]);
                 soft::RenderCommand::BindBuffer {
                     stage: pso::Stage::Vertex,
                     index: vb.binding as usize,
@@ -672,22 +678,27 @@ impl State {
     }
 
     fn pre_draw(&mut self) -> impl Iterator<Item = soft::RenderCommand<&soft::Own>> {
+        let max_descs = self.render_pso.as_ref().unwrap().num_descriptor_sets;
         let vbuf_range = mem::replace(&mut self.dirty_vertex_buffers, 0 .. 0);
         let dset_range =
-            self.dirty_graphics_descriptor_sets.start as usize ..
-            self.dirty_graphics_descriptor_sets.end as usize;
+            (self.dirty_graphics_descriptor_sets.start as usize).min(max_descs) ..
+            (self.dirty_graphics_descriptor_sets.end as usize).min(max_descs);
         self.dirty_graphics_descriptor_sets = 0 .. 0;
 
+        //println!("pre_draw with {} sets out of {}", num_descriptor_sets, self.graphics_descriptor_sets.len());
         let dynamic_offsets = &self.dynamic_offsets;
         let dset_updates = self.graphics_descriptor_sets[dset_range]
             .iter()
             .filter_map(Option::as_ref)
             .flat_map(move |active_desc| active_desc.bind_to_graphics(dynamic_offsets, false));
 
-        self.set_vertex_buffers(vbuf_range)
+        let com_vbuf = self.set_vertex_buffers(vbuf_range)
             .into_iter()
-            .flat_map(|coms| coms)
-            .chain(dset_updates)
+            .flat_map(|coms| coms);
+
+        //Note: order is important! There might be invalid descriptor sets in range, and we want the valid
+        // vertex buffers to overwrite those bindings. Yikes!
+        dset_updates.chain(com_vbuf)
     }
 }
 
@@ -2880,6 +2891,7 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                 ps.ds_desc = pipeline.depth_stencil_desc.clone();
                 ps.at_formats.clear();
                 ps.at_formats.extend_from_slice(&pipeline.attachment_formats);
+                ps.num_descriptor_sets = pipeline.num_descriptor_sets;
                 true
             }
             None => {
@@ -2888,6 +2900,7 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                     ds_desc: pipeline.depth_stencil_desc.clone(),
                     vbuf_map: pipeline.vertex_buffer_map.clone(),
                     at_formats: pipeline.attachment_formats.clone(),
+                    num_descriptor_sets: pipeline.num_descriptor_sets,
                 });
                 true
             }
@@ -2965,10 +2978,10 @@ impl com::RawCommandBuffer<Backend> for CommandBuffer {
                         None => (false, false),
                     };
                     offset_base += num_dynamic_offsets;
-                    if same_set && same_offsets {
-                        continue;
-                    }
-                    assert!(!same_set || num_dynamic_offsets != 0);
+                    //if same_set && same_offsets { //TODO!!!
+                    //    continue;
+                    //}
+                    //assert!(!same_set || num_dynamic_offsets != 0);
 
                     *out_desc = Some(ActiveDescriptorSet {
                         set: desc_set.clone(),

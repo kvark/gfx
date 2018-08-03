@@ -1003,6 +1003,7 @@ impl hal::Device<Backend> for Device {
                     baked_states: pipeline_desc.baked_states.clone(),
                     vertex_buffer_map,
                     attachment_formats,
+                    num_descriptor_sets: pipeline_layout.offsets.len(),
                 })
             .map_err(|err| {
                 error!("PSO creation failed: {}", err);

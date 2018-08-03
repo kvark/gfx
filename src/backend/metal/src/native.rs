@@ -272,6 +272,7 @@ pub struct GraphicsPipeline {
     pub(crate) vertex_buffer_map: VertexBufferMap,
     /// Tracked attachment formats for figuring (roughly) renderpass compatibility.
     pub(crate) attachment_formats: Vec<Option<Format>>,
+    pub(crate) num_descriptor_sets: usize,
 }
 
 unsafe impl Send for GraphicsPipeline {}
