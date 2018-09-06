@@ -5,7 +5,6 @@
 use {device, pass};
 use std::error::Error;
 use std::fmt;
-use std::ops::Range;
 
 mod compute;
 mod descriptor;
@@ -148,16 +147,16 @@ impl From<Stage> for ShaderStageFlags {
 
 /// Shader entry point.
 #[derive(Debug, Copy)]
-pub struct EntryPoint<'a, B: Backend> {
+pub struct EntryPoint<'a, B: Backend, V: 'a> {
     /// Entry point name.
     pub entry: &'a str,
     /// Shader module reference.
     pub module: &'a B::ShaderModule,
-    /// Specialization.
-    pub specialization: Specialization<'a>,
+    /// Specialization info.
+    pub specialization: &'a [Specialization<V>],
 }
 
-impl<'a, B: Backend> Clone for EntryPoint<'a, B> {
+impl<'a, B: Backend, V> Clone for EntryPoint<'a, B, V> {
     fn clone(&self) -> Self {
         EntryPoint {
             entry: self.entry,
@@ -198,7 +197,7 @@ pub enum BasePipeline<'a, P: 'a> {
     None,
 }
 
-/// Specialization constant for pipelines.
+/// Specialization of shader entry points.
 /// 
 /// Specialization constants allow for easy configuration of 
 /// multiple similar pipelines. For example, there may be a 
@@ -209,38 +208,11 @@ pub enum BasePipeline<'a, P: 'a> {
 /// More importantly, they are fast to execute, since the driver 
 /// can optimize out the branch on that other PSO creation.
 #[derive(Debug, Clone)]
-pub struct SpecializationConstant {
+pub struct Specialization<V> {
     /// Constant identifier in shader source.
     pub id: u32,
     /// Value to override specialization constant.
-    pub range: Range<u16>,
-}
-
-/// Specialization information structure.
-#[derive(Debug, Copy)]
-pub struct Specialization<'a> {
-    /// Constant array.
-    pub constants: &'a [SpecializationConstant],
-    /// Raw data.
-    pub data: &'a [u8],
-}
-
-impl<'a> Default for Specialization<'a> {
-    fn default() -> Self {
-        Specialization {
-            constants: &[],
-            data: &[],
-        }
-    }
-}
-
-impl<'a> Clone for Specialization<'a> {
-    fn clone(&self) -> Self {
-        Specialization {
-            constants: self.constants,
-            data: self.data,
-        }
-    }
+    pub value: V,
 }
 
 /// Pipeline state which may be static or dynamic.

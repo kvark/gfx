@@ -443,28 +443,25 @@ fn main() {
 
         let pipeline = {
             let (vs_entry, fs_entry) = (
-                pso::EntryPoint::<back::Backend> {
+                pso::EntryPoint::<back::Backend, _> {
                     entry: ENTRY_NAME,
                     module: &vs_module,
-                    specialization: pso::Specialization {
-                        constants: &[
-                            pso::SpecializationConstant {
-                                id: 0,
-                                range: 0 .. 4,
-                            },
-                        ],
-                        data: &[ // this is 0.8, trust me
-                            0xCD,
-                            0xCC,
-                            0x4C,
-                            0x3F,
-                        ],
-                    },
+                    specialization: &[
+                        pso::Specialization {
+                            id: 0,
+                            value: &[ // this is 0.8, trust me
+                                0xCD,
+                                0xCC,
+                                0x4C,
+                                0x3F,
+                            ][..],
+                        },
+                    ],
                 },
-                pso::EntryPoint::<back::Backend> {
+                pso::EntryPoint {
                     entry: ENTRY_NAME,
                     module: &fs_module,
-                    specialization: pso::Specialization::default(),
+                    specialization: &[],
                 },
             );
 

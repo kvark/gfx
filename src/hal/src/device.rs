@@ -232,21 +232,22 @@ pub trait Device<B: Backend>: Any + Send + Sync {
     fn destroy_pipeline_cache(&self, cache: B::PipelineCache);
 
     /// Create a graphics pipeline.
-    fn create_graphics_pipeline<'a>(
+    fn create_graphics_pipeline<'a, V: 'a + Borrow<[u8]>>(
         &self,
-        desc: &pso::GraphicsPipelineDesc<'a, B>,
+        desc: &pso::GraphicsPipelineDesc<'a, B, V>,
         cache: Option<&B::PipelineCache>,
     ) -> Result<B::GraphicsPipeline, pso::CreationError> {
         self.create_graphics_pipelines(iter::once(desc), cache).remove(0)
     }
 
     /// Create graphics pipelines.
-    fn create_graphics_pipelines<'a, I>(
+    fn create_graphics_pipelines<'a, I, V>(
         &self, descs: I, cache: Option<&B::PipelineCache>
     ) -> Vec<Result<B::GraphicsPipeline, pso::CreationError>>
     where
         I: IntoIterator,
-        I::Item: Borrow<pso::GraphicsPipelineDesc<'a, B>>,
+        I::Item: Borrow<pso::GraphicsPipelineDesc<'a, B, V>>,
+        V: 'a + Borrow<[u8]>,
     {
         descs
             .into_iter()
@@ -261,21 +262,22 @@ pub trait Device<B: Backend>: Any + Send + Sync {
     fn destroy_graphics_pipeline(&self, pipeline: B::GraphicsPipeline);
 
     /// Create a compute pipeline.
-    fn create_compute_pipeline<'a>(
+    fn create_compute_pipeline<'a, V: 'a + Borrow<[u8]>>(
         &self,
-        desc: &pso::ComputePipelineDesc<'a, B>,
+        desc: &pso::ComputePipelineDesc<'a, B, V>,
         cache: Option<&B::PipelineCache>,
     ) -> Result<B::ComputePipeline, pso::CreationError> {
         self.create_compute_pipelines(iter::once(desc), cache).remove(0)
     }
 
     /// Create compute pipelines.
-    fn create_compute_pipelines<'a, I>(
+    fn create_compute_pipelines<'a, I, V>(
         &self, descs: I, cache: Option<&B::PipelineCache>
     ) -> Vec<Result<B::ComputePipeline, pso::CreationError>>
     where
         I: IntoIterator,
-        I::Item: Borrow<pso::ComputePipelineDesc<'a, B>>,
+        I::Item: Borrow<pso::ComputePipelineDesc<'a, B, V>>,
+        V: 'a + Borrow<[u8]>,
     {
         descs
             .into_iter()

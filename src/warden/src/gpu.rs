@@ -636,7 +636,7 @@ impl<B: hal::Backend> Scene<B, hal::General> {
                         ref input_assembler, ref blender, depth_stencil, ref layout, ref subpass,
                     } => {
                         let reshaders = &resources.shaders;
-                        let entry = |shader: &String| -> Option<pso::EntryPoint<B>> {
+                        let entry = |shader: &String| -> Option<pso::EntryPoint<B, &[u8]>> {
                             if shader.is_empty() {
                                 None
                             } else {
@@ -645,7 +645,7 @@ impl<B: hal::Backend> Scene<B, hal::General> {
                                     module: reshaders
                                         .get(shader)
                                         .expect(&format!("Missing shader: {}", shader)),
-                                    specialization: pso::Specialization::default(),
+                                    specialization: &[],
                                 })
                             }
                         };
@@ -656,7 +656,7 @@ impl<B: hal::Backend> Scene<B, hal::General> {
                                     module: reshaders
                                         .get(&shaders.vertex)
                                         .expect(&format!("Missing vertex shader: {}", shaders.vertex)),
-                                    specialization: pso::Specialization::default(),
+                                    specialization: &[],
                                 },
                                 hull: entry(&shaders.hull),
                                 domain: entry(&shaders.domain),
@@ -686,12 +686,12 @@ impl<B: hal::Backend> Scene<B, hal::General> {
                     }
                     raw::Resource::ComputePipeline { ref shader, ref layout } => {
                         let desc = pso::ComputePipelineDesc {
-                            shader: pso::EntryPoint {
+                            shader: pso::EntryPoint::<B, &[u8]> {
                                 entry: "main",
                                 module: resources.shaders
                                     .get(shader)
                                     .expect(&format!("Missing compute shader: {}", shader)),
-                                specialization: pso::Specialization::default(),
+                                specialization: &[],
                             },
                             layout: resources.pipeline_layouts
                                 .get(layout)

@@ -77,7 +77,7 @@ fn main() {
         let entry_point = pso::EntryPoint {
             entry: "main",
             module: &shader,
-            specialization: pso::Specialization::default(),
+            specialization: &[],
         };
         let pipeline = device
             .create_compute_pipeline(&pso::ComputePipelineDesc::new(entry_point, &pipeline_layout), None)

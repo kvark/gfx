@@ -196,8 +196,8 @@ enum FunctionError {
     BadSpecialization,
 }
 
-fn get_final_function(
-    library: &metal::LibraryRef, entry: &str, specialization: pso::Specialization
+fn get_final_function<V: Borrow<[u8]>>(
+    library: &metal::LibraryRef, entry: &str, specialization: &[pso::Specialization<V>]
 ) -> Result<metal::Function, FunctionError> {
     type MTLFunctionConstant = Object;
 
@@ -231,11 +231,11 @@ fn get_final_function(
         let required: BOOL = unsafe {
             msg_send![object, required]
         };
-        match specialization.constants.iter().find(|c| c.id as NSUInteger == index) {
+        match specialization.iter().find(|c| c.id as NSUInteger == index) {
             Some(c) => unsafe {
-                let ptr = &specialization.data[c.range.start as usize] as *const u8 as *const _;
+                let value = c.value.borrow();
                 let ty: MTLDataType = msg_send![object, type];
-                constants.set_constant_value_at_index(c.id as NSUInteger, ty, ptr);
+                constants.set_constant_value_at_index(c.id as NSUInteger, ty, value.as_ptr() as *const _);
             }
             None if required != NO => {
                 //TODO: get name
@@ -739,9 +739,9 @@ impl Device {
         })
     }
 
-    fn load_shader(
+    fn load_shader<V: Borrow<[u8]>>(
         &self,
-        ep: &pso::EntryPoint<Backend>,
+        ep: &pso::EntryPoint<Backend, V>,
         layout: &n::PipelineLayout,
         primitive_class: MTLPrimitiveTopologyClass,
         pipeline_cache: Option<&n::PipelineCache>,
@@ -1087,12 +1087,12 @@ impl hal::Device<Backend> for Device {
         }
     }
 
-    fn create_graphics_pipeline<'a>(
+    fn create_graphics_pipeline<'a, V: 'a + Borrow<[u8]>>(
         &self,
-        pipeline_desc: &pso::GraphicsPipelineDesc<'a, Backend>,
+        pipeline_desc: &pso::GraphicsPipelineDesc<'a, Backend, V>,
         cache: Option<&n::PipelineCache>,
     ) -> Result<n::GraphicsPipeline, pso::CreationError> {
-        debug!("create_graphics_pipeline {:?}", pipeline_desc);
+        debug!("create_graphics_pipeline"); //TODO: print the desc
         let pipeline = metal::RenderPipelineDescriptor::new();
         let pipeline_layout = &pipeline_desc.layout;
         let pass_descriptor = &pipeline_desc.subpass;
@@ -1332,12 +1332,12 @@ impl hal::Device<Backend> for Device {
             })
     }
 
-    fn create_compute_pipeline<'a>(
+    fn create_compute_pipeline<'a, V: 'a + Borrow<[u8]>>(
         &self,
-        pipeline_desc: &pso::ComputePipelineDesc<'a, Backend>,
+        pipeline_desc: &pso::ComputePipelineDesc<'a, Backend, V>,
         cache: Option<&n::PipelineCache>,
     ) -> Result<n::ComputePipeline, pso::CreationError> {
-        debug!("create_compute_pipeline {:?}", pipeline_desc);
+        debug!("create_compute_pipeline"); //TODO: print the desc
         let pipeline = metal::ComputePipelineDescriptor::new();
 
         let (cs_lib, cs_function, work_group_size) = self.load_shader(

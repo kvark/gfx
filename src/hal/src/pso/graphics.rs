@@ -60,24 +60,24 @@ pub type StencilValue = u32;
 /// fragment depth is considered to be unmodified. This can
 /// be useful for depth-only rendering.
 #[derive(Clone, Debug)]
-pub struct GraphicsShaderSet<'a, B: Backend> {
+pub struct GraphicsShaderSet<'a, B: Backend, V: 'a> {
     /// A shader that outputs a vertex in a model.
-    pub vertex: EntryPoint<'a, B>,
+    pub vertex: EntryPoint<'a, B, V>,
     /// A hull shader takes in an input patch (values representing
     /// a small portion of a shape, which may be actual geometry or may
     /// be parameters for creating geometry) and produces one or more
     /// output patches.
-    pub hull: Option<EntryPoint<'a, B>>,
+    pub hull: Option<EntryPoint<'a, B, V>>,
     /// A shader that takes in domains produced from a hull shader's output
     /// patches and computes actual vertex positions.
-    pub domain: Option<EntryPoint<'a, B>>,
+    pub domain: Option<EntryPoint<'a, B, V>>,
     /// A shader that takes given input vertexes and outputs zero
     /// or more output vertexes.
-    pub geometry: Option<EntryPoint<'a, B>>,
+    pub geometry: Option<EntryPoint<'a, B, V>>,
     /// A shader that outputs a value for a fragment.
     /// Usually this value is a color that is then displayed as a
     /// pixel on a screen.
-    pub fragment: Option<EntryPoint<'a, B>>,
+    pub fragment: Option<EntryPoint<'a, B, V>>,
 }
 
 /// Baked-in pipeline states.
@@ -97,9 +97,9 @@ pub struct BakedStates {
 /// A description of all the settings that can be altered
 /// when creating a graphics pipeline.
 #[derive(Debug)]
-pub struct GraphicsPipelineDesc<'a, B: Backend> {
+pub struct GraphicsPipelineDesc<'a, B: Backend, V: 'a> {
     /// A set of graphics shaders to use for the pipeline.
-    pub shaders: GraphicsShaderSet<'a, B>,
+    pub shaders: GraphicsShaderSet<'a, B, V>,
     /// Rasterizer setup
     pub rasterizer: Rasterizer,
     /// Vertex buffers (IA)
@@ -128,10 +128,10 @@ pub struct GraphicsPipelineDesc<'a, B: Backend> {
     pub parent: BasePipeline<'a, B::GraphicsPipeline>,
 }
 
-impl<'a, B: Backend> GraphicsPipelineDesc<'a, B> {
+impl<'a, B: Backend, V> GraphicsPipelineDesc<'a, B, V> {
     /// Create a new empty PSO descriptor.
     pub fn new(
-        shaders: GraphicsShaderSet<'a, B>,
+        shaders: GraphicsShaderSet<'a, B, V>,
         primitive: Primitive,
         rasterizer: Rasterizer,
         layout: &'a B::PipelineLayout,
