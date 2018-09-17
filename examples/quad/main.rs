@@ -33,6 +33,7 @@ use hal::{Device, Instance, PhysicalDevice, Surface, Swapchain};
 
 use std::fs;
 use std::io::{Cursor, Read};
+use std::time::Instant;
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
 const DIMS: Extent2D = Extent2D { width: 1024,height: 768 };
@@ -67,6 +68,7 @@ const COLOR_RANGE: i::SubresourceRange = i::SubresourceRange {
 fn main() {
     env_logger::init();
 
+    let bench_count = 100;
     let mut events_loop = winit::EventsLoop::new();
 
     let wb = winit::WindowBuilder::new()
@@ -81,7 +83,22 @@ fn main() {
         let window = wb.build(&events_loop).unwrap();
         let instance = back::Instance::create("gfx-rs quad", 1);
         let surface = instance.create_surface(&window);
+
+        let instant_start = Instant::now();
         let adapters = instance.enumerate_adapters();
+        let instant_long = Instant::now();
+        for _ in 0 .. bench_count {
+            instance.enumerate_adapters();
+        }
+        let instant_end = Instant::now();
+        let time_cold = instant_long - instant_start;
+        let time_hot = instant_end - instant_long;
+        let ms_cold = time_cold.as_secs() as u32 * 1_000 + time_cold.subsec_millis();
+        let ms_hot = time_hot.as_secs() as u32 * 1_000 + time_hot.subsec_millis();
+        println!("Adapter enumeration time:");
+        println!("\tcold: {}ms", ms_cold);
+        println!("\thot: {}ms", ms_hot / bench_count);
+
         (window, instance, adapters, surface)
     };
     #[cfg(feature = "gl")]
@@ -107,9 +124,24 @@ fn main() {
     let limits = adapter.physical_device.limits();
 
     // Build a new device and associated command queues
+    let family_type = adapter.queue_families[0].clone();
+    let instant_start = Instant::now();
     let (device, mut queue_group) = adapter
         .open_with::<_, hal::Graphics>(1, |family| surface.supports_queue_family(family))
         .unwrap();
+    let instant_long = Instant::now();
+    for _ in 0 .. bench_count {
+        let _ = adapter.physical_device.open(&[(&family_type, &[1.0])]);
+    }
+    {
+        let time_warm = instant_long.elapsed();
+        let time_cold = instant_long - instant_start;
+        let ms_cold = time_cold.as_secs() as u32 * 1_000 + time_cold.subsec_millis();
+        let ms_warm = time_warm.as_secs() as u32 * 1_000 + time_warm.subsec_millis();
+        println!("Device creation time:");
+        println!("\tcold: {}ms", ms_cold);
+        println!("\twarm: {}ms", ms_warm / bench_count);
+    }
 
     let mut command_pool =
         device.create_command_pool_typed(&queue_group, pool::CommandPoolCreateFlags::empty(), 16);
