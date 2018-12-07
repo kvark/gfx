@@ -89,7 +89,7 @@ impl hal::PhysicalDevice<Backend> for PhysicalDevice {
 /// Dummy command queue doing nothing.
 pub struct RawCommandQueue;
 impl queue::RawCommandQueue<Backend> for RawCommandQueue {
-    unsafe fn submit_raw<IC>(&mut self, _: queue::RawSubmission<Backend, IC>, _: Option<&()>)
+    unsafe fn submit<IC>(&mut self, _: queue::Submission<Backend, IC>, _: Option<&()>)
     where
         IC: IntoIterator,
         IC::Item: Borrow<RawCommandBuffer>,
@@ -418,11 +418,9 @@ impl pool::RawCommandPool<Backend> for RawCommandPool {
         unimplemented!()
     }
 
-    fn allocate(&mut self, _: usize, _: command::RawLevel) -> Vec<RawCommandBuffer> {
-        unimplemented!()
-    }
-
-    unsafe fn free(&mut self, _: Vec<RawCommandBuffer>) {
+    unsafe fn free<I>(&mut self, _: I)
+    where I: IntoIterator<Item = RawCommandBuffer>
+    {
         unimplemented!()
     }
 }

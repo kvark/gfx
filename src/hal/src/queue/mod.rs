@@ -25,7 +25,7 @@ pub use self::capability::{
 pub use self::family::{
     QueueFamily, QueueFamilyId, QueueGroup, Queues,
 };
-pub use self::submission::{RawSubmission, Submission};
+pub use self::submission::Submission;
 
 
 /// The type of the queue, an enum encompassing `queue::Capability`
@@ -51,7 +51,7 @@ pub trait RawCommandQueue<B: Backend>: Any + Send + Sync {
     /// Unsafe because it's not checked that the queue can process the submitted command buffers.
     /// Trying to submit compute commands to a graphics queue will result in undefined behavior.
     /// Each queue implements safe wrappers according to their supported functionalities!
-    unsafe fn submit_raw<IC>(&mut self, submission: RawSubmission<B, IC>, fence: Option<&B::Fence>)
+    unsafe fn submit<IC>(&mut self, submission: Submission<B, IC>, fence: Option<&B::Fence>)
     where
         Self: Sized,
         IC: IntoIterator,
@@ -61,7 +61,7 @@ pub trait RawCommandQueue<B: Backend>: Any + Send + Sync {
     /// semaphores given in `wait_semaphores`. A given swapchain must not appear in this
     /// list more than once.
     ///
-    /// Unsafe for the same reasons as `submit_raw()`.
+    /// Unsafe for the same reasons as `submit()`.
     fn present<IS, S, IW>(&mut self, swapchains: IS, wait_semaphores: IW) -> Result<(), ()>
     where
         Self: Sized,
@@ -79,9 +79,9 @@ pub struct CommandQueue<B: Backend, C>(B::CommandQueue, PhantomData<C>);
 
 impl<B: Backend, C> CommandQueue<B, C> {
     /// Create typed command queue from raw.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// `<C as Capability>::supported_by(queue_type)` must return true
     /// for `queue_type` being the type this `raw` queue.
     pub unsafe fn new(raw: B::CommandQueue) -> Self {
@@ -105,14 +105,15 @@ impl<B: Backend, C> CommandQueue<B, C> {
 
     /// Submits the submission command buffers to the queue for execution.
     /// `fence` will be signalled after submission and _must_ be unsignalled.
-    pub fn submit<D>(&mut self,
-        submission: Submission<B, D>,
+    pub fn submit<IC>(&mut self,
+        submission: Submission<B, IC>,
         fence: Option<&B::Fence>,
     ) where
-        C: Supports<D>
+        IC: IntoIterator,
+        IC::Item: Borrow<B::CommandBuffer>,
     {
         unsafe {
-            self.0.submit_raw(submission.to_raw(), fence)
+            self.0.submit(submission, fence)
         }
     }
 

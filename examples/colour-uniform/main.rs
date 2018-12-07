@@ -184,7 +184,6 @@ impl<B: Backend> RendererState<B> {
         let mut staging_pool = device.borrow().device.create_command_pool_typed(
             &device.borrow().queues,
             pool::CommandPoolCreateFlags::empty(),
-            16,
         );
 
         let image = ImageState::new::<hal::Graphics>(
@@ -504,42 +503,41 @@ impl<B: Backend> RendererState<B> {
             command_pool.reset();
 
             // Rendering
-            let submit = {
-                let mut cmd_buffer = command_pool.acquire_command_buffer(false);
+            let mut cmd_buffer = command_pool.acquire_command_buffer();
+            cmd_buffer.begin(false);
 
-                cmd_buffer.set_viewports(0, &[self.viewport.clone()]);
-                cmd_buffer.set_scissors(0, &[self.viewport.rect]);
-                cmd_buffer.bind_graphics_pipeline(self.pipeline.pipeline.as_ref().unwrap());
-                cmd_buffer.bind_vertex_buffers(
-                    0,
-                    Some((self.vertex_buffer.get_buffer(), 0)),
+            cmd_buffer.set_viewports(0, &[self.viewport.clone()]);
+            cmd_buffer.set_scissors(0, &[self.viewport.rect]);
+            cmd_buffer.bind_graphics_pipeline(self.pipeline.pipeline.as_ref().unwrap());
+            cmd_buffer.bind_vertex_buffers(
+                0,
+                Some((self.vertex_buffer.get_buffer(), 0)),
+            );
+            cmd_buffer.bind_graphics_descriptor_sets(
+                self.pipeline.pipeline_layout.as_ref().unwrap(),
+                0,
+                vec![self.image.desc.set.as_ref().unwrap(), self.uniform.desc.as_ref().unwrap().set.as_ref().unwrap()],
+                &[],
+            ); //TODO
+
+            {
+                let mut encoder = cmd_buffer.begin_render_pass_inline(
+                    self.render_pass.render_pass.as_ref().unwrap(),
+                    framebuffer,
+                    self.viewport.rect,
+                    &[command::ClearValue::Color(command::ClearColor::Float([
+                        cr, cg, cb, 1.0,
+                    ]))],
                 );
-                cmd_buffer.bind_graphics_descriptor_sets(
-                    self.pipeline.pipeline_layout.as_ref().unwrap(),
-                    0,
-                    vec![self.image.desc.set.as_ref().unwrap(), self.uniform.desc.as_ref().unwrap().set.as_ref().unwrap()],
-                    &[],
-                ); //TODO
+                encoder.draw(0..6, 0..1);
+            }
+            cmd_buffer.finish();
 
-                {
-                    let mut encoder = cmd_buffer.begin_render_pass_inline(
-                        self.render_pass.render_pass.as_ref().unwrap(),
-                        framebuffer,
-                        self.viewport.rect,
-                        &[command::ClearValue::Color(command::ClearColor::Float([
-                            cr, cg, cb, 1.0,
-                        ]))],
-                    );
-                    encoder.draw(0..6, 0..1);
-                }
-
-                cmd_buffer.finish()
+            let submission = Submission {
+                cmd_buffers: &[&cmd_buffer],
+                wait_semaphores: &[(&*image_acquired, PipelineStage::BOTTOM_OF_PIPE)],
+                signal_semaphores: &[&*image_present],
             };
-
-            let submission = Submission::new()
-                .wait_on(&[(&*image_acquired, PipelineStage::BOTTOM_OF_PIPE)])
-                .signal(&[&*image_present])
-                .submit(Some(submit));
             self.device.borrow_mut().queues.queues[0].submit(submission, Some(framebuffer_fence));
 
             // present frame
