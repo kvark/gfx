@@ -51,11 +51,7 @@ pub trait RawCommandQueue<B: Backend>: Any + Send + Sync {
     /// Unsafe because it's not checked that the queue can process the submitted command buffers.
     /// Trying to submit compute commands to a graphics queue will result in undefined behavior.
     /// Each queue implements safe wrappers according to their supported functionalities!
-    unsafe fn submit<IC>(&mut self, submission: Submission<B, IC>, fence: Option<&B::Fence>)
-    where
-        Self: Sized,
-        IC: IntoIterator,
-        IC::Item: Borrow<B::CommandBuffer>;
+    unsafe fn submit<'a>(&mut self, submission: Submission<B, impl IntoIterator<Item = &'a (impl Borrow<B::CommandBuffer> + 'a)>>, fence: Option<&B::Fence>);
 
     /// Presents the result of the queue to the given swapchains, after waiting on all the
     /// semaphores given in `wait_semaphores`. A given swapchain must not appear in this
@@ -105,12 +101,10 @@ impl<B: Backend, C> CommandQueue<B, C> {
 
     /// Submits the submission command buffers to the queue for execution.
     /// `fence` will be signalled after submission and _must_ be unsignalled.
-    pub fn submit<IC>(&mut self,
-        submission: Submission<B, IC>,
+    pub fn submit<'a>(&mut self,
+        submission: Submission<B, impl IntoIterator<Item = &'a (impl Borrow<B::CommandBuffer> + 'a)>>,
         fence: Option<&B::Fence>,
-    ) where
-        IC: IntoIterator,
-        IC::Item: Borrow<B::CommandBuffer>,
+    )
     {
         unsafe {
             self.0.submit(submission, fence)

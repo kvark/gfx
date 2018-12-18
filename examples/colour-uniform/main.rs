@@ -534,7 +534,7 @@ impl<B: Backend> RendererState<B> {
             cmd_buffer.finish();
 
             let submission = Submission {
-                cmd_buffers: &[&cmd_buffer],
+                cmd_buffers: Some(&cmd_buffer),
                 wait_semaphores: &[(&*image_acquired, PipelineStage::BOTTOM_OF_PIPE)],
                 signal_semaphores: &[&*image_present],
             };

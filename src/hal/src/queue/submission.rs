@@ -7,11 +7,7 @@ use std::borrow::Borrow;
 
 
 /// Submission information for a command queue.
-pub struct Submission<'a, B: Backend + 'a, IC>
-where
-    IC: IntoIterator,
-    IC::Item: Borrow<B::CommandBuffer>,
-{
+pub struct Submission<'a, B: Backend + 'a, IC> {
     /// Command buffers to submit.
     pub cmd_buffers: IC,
     /// Semaphores to wait being signalled before submission.
