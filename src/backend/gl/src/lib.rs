@@ -172,7 +172,8 @@ impl Drop for GlContainer {
         // Contexts must be manually destroyed to prevent a panic
         self.surfman_device
             .read()
-            .destroy_context(&mut self.surfman_context.write());
+            .destroy_context(&mut self.surfman_context.write())
+            .expect("TODO");
     }
 }
 

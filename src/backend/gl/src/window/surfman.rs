@@ -55,8 +55,12 @@ impl fmt::Debug for Instance {
 impl Instance {
     fn get_default_context_attributes() -> sm::ContextAttributes {
         sm::ContextAttributes {
-            version: surfman::GLVersion::new(3, 3), // TODO: Figure out how to determine GL version
-            flags: surfman::ContextAttributeFlags::empty(),
+            version: sm::GLVersion::new(3, 3), // TODO: Figure out how to determine GL version
+            // TODO: Determine flags to provide. At least ALPH I think, but probably all of them.
+            // skipping COMPATIBILITY_PROFILE for now, because it panics with a TODO.
+            flags: sm::ContextAttributeFlags::ALPHA
+                | sm::ContextAttributeFlags::DEPTH
+                | sm::ContextAttributeFlags::STENCIL,
         }
     }
 
@@ -197,18 +201,8 @@ impl Surface {
     }
 
     fn swapchain_formats(&self) -> Vec<f::Format> {
-        // let pixel_format = self.context.get_pixel_format();
-        // let color_bits = pixel_format.color_bits;
-        // let alpha_bits = pixel_format.alpha_bits;
-        // let srgb = pixel_format.srgb;
-
-        // TODO: expose more formats
-        // match (color_bits, alpha_bits, srgb) {
-        //     (24, 8, true) => vec![f::Format::Rgba8Srgb, f::Format::Bgra8Srgb],
-        //     (24, 8, false) => vec![f::Format::Rgba8Unorm, f::Format::Bgra8Unorm],
-        //     _ => vec![],
-        // }
-        // TODO: Figure out how to get pixel format from surfman
+        // TODO: Make sure this is correct. I believe it is. Reference:
+        // http://docs.rs/surfman/struct.ContextAttributeFlags.html#associatedconstant.ALPHA
         vec![f::Format::Rgba8Srgb, f::Format::Bgra8Srgb]
     }
 }
@@ -218,7 +212,8 @@ impl Drop for Surface {
         // Destroy the underlying surface
         self.device
             .read()
-            .destroy_surface(&mut self.context.write(), &mut self.surface.write());
+            .destroy_surface(&mut self.context.write(), &mut self.surface.write())
+            .expect("TODO");
     }
 }
 
@@ -231,6 +226,7 @@ impl window::PresentationSurface<B> for Surface {
         config: window::SwapchainConfig,
     ) -> Result<(), window::CreationError> {
         let gl = &device.share.context;
+        let surface_info = self.device.read().surface_info(&self.surface.read());
 
         if let Some(old) = self.swapchain.take() {
             for fbo in old.fbos {
@@ -251,7 +247,7 @@ impl window::PresentationSurface<B> for Surface {
             config.extent.height as i32,
         );
 
-        let fbo = gl.create_framebuffer().unwrap();
+        let fbo = surface_info.framebuffer_object;
         gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(fbo));
         gl.framebuffer_renderbuffer(
             glow::READ_FRAMEBUFFER,
