@@ -195,6 +195,8 @@ pub struct PushConstantInfo {
     pub buffer_index: ResourceIndex,
 }
 
+pub type BufferMutabilityMask = u64;
+
 #[derive(Debug)]
 pub struct PipelineLayout {
     pub(crate) shader_compiler_options: msl::CompilerOptions,
@@ -203,6 +205,7 @@ pub struct PipelineLayout {
     pub(crate) total: MultiStageResourceCounters,
     pub(crate) push_constants: MultiStageData<Option<PushConstantInfo>>,
     pub(crate) total_push_constants: u32,
+    pub(crate) mutability_mask: MultiStageData<BufferMutabilityMask>,
 }
 
 #[derive(Clone)]

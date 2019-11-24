@@ -1,5 +1,8 @@
 # Change Log
 
+### backend-metal-0.4.2 (24-11-2019)
+  - fix buffer mutability qualifiers
+
 ### backend-metal-0.4.1 (12-11-2019)
   - fix missing iOS metallib
 

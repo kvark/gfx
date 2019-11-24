@@ -188,7 +188,7 @@ impl Shared {
                 Some(MAX_ACTIVE_COMMAND_BUFFERS),
             )),
             queue_blocker: Mutex::new(command::QueueBlocker::default()),
-            service_pipes: internal::ServicePipes::new(&device),
+            service_pipes: internal::ServicePipes::new(&device, &private_caps),
             disabilities: PrivateDisabilities {
                 broken_viewport_near_depth: device.name().starts_with("Intel")
                     && !device.supports_feature_set(MTLFeatureSet::macOS_GPUFamily1_v4),
@@ -638,6 +638,18 @@ const DEPTH_CLIP_MODE: &[MTLFeatureSet] = &[
     MTLFeatureSet::macOS_GPUFamily1_v1,
 ];
 
+const BUFFER_MUTABILITY: &[MTLFeatureSet] = &[
+    MTLFeatureSet::iOS_GPUFamily1_v4,
+    MTLFeatureSet::iOS_GPUFamily2_v4,
+    MTLFeatureSet::iOS_GPUFamily3_v3,
+    MTLFeatureSet::iOS_GPUFamily4_v1,
+    MTLFeatureSet::iOS_GPUFamily5_v1,
+    MTLFeatureSet::tvOS_GPUFamily1_v3,
+    MTLFeatureSet::tvOS_GPUFamily2_v1,
+    MTLFeatureSet::macOS_GPUFamily1_v3,
+    MTLFeatureSet::macOS_GPUFamily2_v1,
+];
+
 #[derive(Clone, Debug)]
 struct PrivateCapabilities {
     pub os_is_mac: bool,
@@ -657,6 +669,7 @@ struct PrivateCapabilities {
     layered_rendering: bool,
     function_specialization: bool,
     depth_clip_mode: bool,
+    buffer_mutability: bool,
     format_depth24_stencil8: bool,
     format_depth32_stencil8_filter: bool,
     format_depth32_stencil8_none: bool,
@@ -796,6 +809,7 @@ impl PrivateCapabilities {
             layered_rendering: Self::supports_any(&device, LAYERED_RENDERING_SUPPORT),
             function_specialization: Self::supports_any(&device, FUNCTION_SPECIALIZATION_SUPPORT),
             depth_clip_mode: Self::supports_any(&device, DEPTH_CLIP_MODE),
+            buffer_mutability: Self::supports_any(&device, BUFFER_MUTABILITY),
             format_depth24_stencil8: os_is_mac && device.d24_s8_supported(),
             format_depth32_stencil8_filter: os_is_mac,
             format_depth32_stencil8_none: !os_is_mac,

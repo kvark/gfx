@@ -450,7 +450,10 @@ pub struct ServicePipes {
 }
 
 impl ServicePipes {
-    pub fn new(device: &metal::DeviceRef) -> Self {
+    pub(crate) fn new(
+        device: &metal::DeviceRef,
+        private_caps: &PrivateCapabilities
+    ) -> Self {
         let data = if cfg!(target_os = "macos") {
             &include_bytes!("./../shaders/gfx-shaders-macos.metallib")[..]
         } else {
@@ -458,8 +461,8 @@ impl ServicePipes {
         };
         let library = device.new_library_with_data(data).unwrap();
 
-        let copy_buffer = Self::create_copy_buffer(&library, device);
-        let fill_buffer = Self::create_fill_buffer(&library, device);
+        let copy_buffer = Self::create_copy_buffer(&library, device, private_caps);
+        let fill_buffer = Self::create_fill_buffer(&library, device, private_caps);
 
         ServicePipes {
             library: Mutex::new(library),
@@ -479,6 +482,7 @@ impl ServicePipes {
     fn create_copy_buffer(
         library: &metal::LibraryRef,
         device: &metal::DeviceRef,
+        private_caps: &PrivateCapabilities,
     ) -> metal::ComputePipelineState {
         let pipeline = metal::ComputePipelineDescriptor::new();
 
@@ -486,12 +490,11 @@ impl ServicePipes {
         pipeline.set_compute_function(Some(&cs_copy_buffer));
         pipeline.set_thread_group_size_is_multiple_of_thread_execution_width(true);
 
-        /*TODO: check MacOS version
-        if let Some(buffers) = pipeline.buffers() {
-            buffers.object_at(0).unwrap().set_mutability(metal::MTLMutability::Mutable);
-            buffers.object_at(1).unwrap().set_mutability(metal::MTLMutability::Immutable);
-            buffers.object_at(2).unwrap().set_mutability(metal::MTLMutability::Immutable);
-        }*/
+        if private_caps.buffer_mutability {
+            if let Some(buffers) = pipeline.buffers() {
+                buffers.object_at(0).unwrap().set_mutability(metal::MTLMutability::Mutable);
+            }
+        }
 
         unsafe { device.new_compute_pipeline_state(&pipeline) }.unwrap()
     }
@@ -499,6 +502,7 @@ impl ServicePipes {
     fn create_fill_buffer(
         library: &metal::LibraryRef,
         device: &metal::DeviceRef,
+        private_caps: &PrivateCapabilities,
     ) -> metal::ComputePipelineState {
         let pipeline = metal::ComputePipelineDescriptor::new();
 
@@ -506,11 +510,11 @@ impl ServicePipes {
         pipeline.set_compute_function(Some(&cs_fill_buffer));
         pipeline.set_thread_group_size_is_multiple_of_thread_execution_width(true);
 
-        /*TODO: check MacOS version
-        if let Some(buffers) = pipeline.buffers() {
-            buffers.object_at(0).unwrap().set_mutability(metal::MTLMutability::Mutable);
-            buffers.object_at(1).unwrap().set_mutability(metal::MTLMutability::Immutable);
-        }*/
+        if private_caps.buffer_mutability {
+            if let Some(buffers) = pipeline.buffers() {
+                buffers.object_at(0).unwrap().set_mutability(metal::MTLMutability::Mutable);
+            }
+        }
 
         unsafe { device.new_compute_pipeline_state(&pipeline) }.unwrap()
     }

@@ -896,6 +896,22 @@ impl Device {
             },
         }
     }
+
+    fn set_mutability(
+        &self,
+        array: &metal::PipelineBufferDescriptorArrayRef,
+        mut mask: n::BufferMutabilityMask,
+    ) {
+        if self.shared.private_caps.buffer_mutability {
+            while mask != 0 {
+                let index = mask.trailing_zeros();
+                array.object_at(index as usize)
+                    .unwrap()
+                    .set_mutability(metal::MTLMutability::Mutable);
+                mask ^= 1 << index;
+            }
+        }
+    }
 }
 
 impl hal::device::Device<Backend> for Device {
@@ -1281,6 +1297,11 @@ impl hal::device::Device<Backend> for Device {
                 }),
             },
             total_push_constants: pc_limits[0].max(pc_limits[1]).max(pc_limits[2]),
+            mutability_mask: n::MultiStageData {
+                vs: 0,
+                ps: 0,
+                cs: 0,
+            },
         })
     }
 
@@ -1407,6 +1428,13 @@ impl hal::device::Device<Backend> for Device {
                 None
             }
         };
+
+        if let Some(buffers) = pipeline.vertex_buffers() {
+            self.set_mutability(buffers, pipeline_desc.layout.mutability_mask.vs);
+        }
+        if let Some(buffers) = pipeline.fragment_buffers() {
+            self.set_mutability(buffers, pipeline_desc.layout.mutability_mask.ps);
+        }
 
         // Other shaders
         if pipeline_desc.shaders.hull.is_some() {
@@ -1645,6 +1673,10 @@ impl hal::device::Device<Backend> for Device {
             cache,
         )?;
         pipeline.set_compute_function(Some(&cs_function));
+
+        if let Some(buffers) = pipeline.buffers() {
+            self.set_mutability(buffers, pipeline_desc.layout.mutability_mask.cs);
+        }
 
         self.shared
             .device
