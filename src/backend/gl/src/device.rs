@@ -1942,8 +1942,8 @@ impl d::Device<B> for Device {
             extent: config.extent,
             context: {
                 surface.context().resize(glutin::dpi::PhysicalSize::new(
-                    config.extent.width as f64,
-                    config.extent.height as f64,
+                    config.extent.width,
+                    config.extent.height,
                 ));
                 surface.context.clone()
             },
