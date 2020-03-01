@@ -9,10 +9,7 @@ use std::sync::Arc;
 
 use glow::HasContext;
 
-use auxil::{
-    FastHashMap,
-    spirv_cross_specialize_ast,
-};
+use auxil::{spirv_cross_specialize_ast, FastHashMap};
 
 use hal::{
     buffer,
@@ -30,8 +27,8 @@ use hal::{
 };
 
 use crate::{
-    conv,
     command as cmd,
+    conv,
     info::LegacyFeatures,
     native as n,
     pool::{BufferMemory, CommandPool, OwnedBuffer},
@@ -56,7 +53,9 @@ fn gen_unexpected_error(err: SpirvErrorCode) -> d::ShaderError {
     d::ShaderError::CompilationFailed(msg)
 }
 
-fn create_fbo_internal(share: &Starc<Share>) -> Option<<GlContext as glow::HasContext>::Framebuffer> {
+fn create_fbo_internal(
+    share: &Starc<Share>,
+) -> Option<<GlContext as glow::HasContext>::Framebuffer> {
     if share.private_caps.framebuffer {
         let gl = &share.context;
         let name = unsafe { gl.create_framebuffer() }.unwrap();
@@ -700,7 +699,9 @@ impl d::Device<B> for Device {
                         );
                     }
                     StorageImage | UniformTexelBuffer | UniformBufferDynamic
-                    | StorageTexelBuffer | StorageBufferDynamic | InputAttachment => unimplemented!(), // 6
+                    | StorageTexelBuffer | StorageBufferDynamic | InputAttachment => {
+                        unimplemented!()
+                    } // 6
                 }
             })
         });
@@ -1078,9 +1079,7 @@ impl d::Device<B> for Device {
         );
 
         if let Err(_) = self.share.check() {
-            Err(d::AllocationError::OutOfMemory(
-                d::OutOfMemory::Host,
-            ))
+            Err(d::AllocationError::OutOfMemory(d::OutOfMemory::Host))
         } else {
             Ok(n::FatSampler::Sampler(name))
         }
