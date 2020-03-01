@@ -1925,17 +1925,17 @@ impl d::Device<B> for Device {
             images.push(image);
         }
 
-        #[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
-        let swapchain = {
-            self.share.instance_context.make_current();
-            Swapchain {
-                fbos,
-                context,
-                extent: config.extent,
-            }
+        // Web
+        #[cfg(target_arch = "wasm32")]
+        let _ = surface;
+        #[cfg(target_arch = "wasm32")]
+        let swapchain = Swapchain {
+            fbos,
+            extent: config.extent,
         };
 
-        #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
+        // Glutin
+        #[cfg(all(not(target_arch = "wasm32"), feature = "glutin"))]
         let swapchain = Swapchain {
             fbos,
             extent: config.extent,
@@ -1948,16 +1948,33 @@ impl d::Device<B> for Device {
             },
         };
 
-        #[cfg(target_arch = "wasm32")]
-        let _ = surface;
-
-        #[cfg(target_arch = "wasm32")]
+        // Surfman
+        #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
         let swapchain = Swapchain {
             fbos,
             extent: config.extent,
+            // TODO: Resize the context to the extent
+            context: surface.context.clone(),
         };
 
-        #[cfg(not(any(target_arch = "wasm32", feature = "glutin", feature = "wgl")))]
+        // WGL
+        #[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
+        let swapchain = {
+            self.share.instance_context.make_current();
+            Swapchain {
+                fbos,
+                context,
+                extent: config.extent,
+            }
+        };
+
+        // Dummy
+        #[cfg(not(any(
+            target_arch = "wasm32",
+            feature = "glutin",
+            feature = "surfman",
+            feature = "wgl"
+        )))]
         let swapchain = Swapchain {
             extent: {
                 let _ = surface;
@@ -1991,7 +2008,7 @@ impl d::Device<B> for Device {
     unsafe fn set_command_buffer_name(
         &self,
         _command_buffer: &mut cmd::CommandBuffer,
-        _name: &str
+        _name: &str,
     ) {
         // TODO
     }

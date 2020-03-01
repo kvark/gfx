@@ -8,14 +8,12 @@ extern crate bitflags;
 #[macro_use]
 extern crate log;
 extern crate gfx_hal as hal;
-#[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
-pub extern crate glutin;
+
+use parking_lot::RwLock;
 
 use std::cell::Cell;
-use std::ffi::c_void;
 use std::fmt;
 use std::ops::Deref;
-use std::os::raw::c_ulong;
 use std::sync::{Arc, Weak};
 use std::thread::{self, ThreadId};
 
@@ -34,18 +32,31 @@ mod queue;
 mod state;
 mod window;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "glutin"))]
-pub use crate::window::glutin::{config_context, Headless, Surface, Swapchain};
+// Web implementation
 #[cfg(target_arch = "wasm32")]
 pub use window::web::{Surface, Swapchain};
 
+// Glutin implementation
+#[cfg(all(not(target_arch = "wasm32"), feature = "glutin"))]
+pub use crate::window::glutin::{Instance, Surface, Swapchain};
+
+// Surfman implementation
+#[cfg(all(feature = "surfman", not(target_arch = "wasm32")))]
+pub use crate::window::surfman::{Instance, Surface, Swapchain};
+
+// WGL implementation
 #[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
 use window::wgl::DeviceContext;
-
 #[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
-pub use window::wgl::{Surface, Swapchain, Instance};
+pub use window::wgl::{Instance, Surface, Swapchain};
 
-#[cfg(not(any(target_arch = "wasm32", feature = "glutin", feature = "wgl")))]
+// Catch-all dummy implementation
+#[cfg(not(any(
+    target_arch = "wasm32",
+    feature = "glutin",
+    feature = "surfman",
+    feature = "wgl"
+)))]
 pub use window::dummy::{Surface, Swapchain};
 
 pub use glow::Context as GlContext;
@@ -53,15 +64,28 @@ use glow::HasContext;
 
 type ColorSlot = u8;
 
-
 pub(crate) struct GlContainer {
     context: GlContext,
+
+    /// In order to set the current context we must have access to the instance
+    #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+    surfman_data: Option<(
+        Starc<RwLock<surfman::Device>>,
+        Starc<RwLock<surfman::Context>>,
+    )>,
 }
 
 impl GlContainer {
-    #[cfg(feature = "glutin")]
+    #[cfg(not(target_arch = "wasm32"))]
     fn make_current(&self) {
-        // Unimplemented
+        // TODO: Implement `make_current()` for other backends
+
+        #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+        {
+            if let Some((device, context)) = &self.surfman_data {
+                device.write().make_context_current(&context.read());
+            }
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -70,7 +94,20 @@ impl GlContainer {
         F: FnMut(&str) -> *const std::os::raw::c_void,
     {
         let context = glow::Context::from_loader_function(fn_proc);
-        GlContainer { context }
+        GlContainer {
+            context,
+            #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+            surfman_data: None,
+        }
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+    fn set_instance(
+        &mut self,
+        device: Starc<RwLock<surfman::Device>>,
+        context: Starc<RwLock<surfman::Context>>,
+    ) {
+        self.surfman_data = Some((device, context));
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -105,7 +142,7 @@ impl GlContainer {
 impl Deref for GlContainer {
     type Target = GlContext;
     fn deref(&self) -> &GlContext {
-        #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
+        #[cfg(not(target_arch = "wasm32"))]
         self.make_current();
         &self.context
     }
@@ -115,16 +152,21 @@ impl Deref for GlContainer {
 pub enum Backend {}
 
 impl hal::Backend for Backend {
-    #[cfg(any(
-        all(not(target_arch = "wasm32"), feature = "glutin"),
-        feature = "wgl"
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        any(feature = "glutin", feature = "surfman", feature = "wgl")
     ))]
     type Instance = Instance;
 
-    #[cfg(all(target_arch = "wasm32", not(feature = "wgl")))]
+    #[cfg(target_arch = "wasm32")]
     type Instance = Surface;
 
-    #[cfg(not(any(target_arch = "wasm32", feature = "glutin", feature = "wgl")))]
+    #[cfg(not(any(
+        target_arch = "wasm32",
+        feature = "glutin",
+        feature = "surfman",
+        feature = "wgl"
+    )))]
     type Instance = DummyInstance;
 
     type PhysicalDevice = PhysicalDevice;
@@ -713,10 +755,20 @@ impl q::QueueFamily for QueueFamily {
     }
 }
 
-#[cfg(not(any(target_arch = "wasm32", feature = "glutin", feature = "wgl")))]
+#[cfg(not(any(
+    target_arch = "wasm32",
+    feature = "glutin",
+    feature = "surfman",
+    feature = "wgl"
+)))]
 pub struct DummyInstance;
 
-#[cfg(not(any(target_arch = "wasm32", feature = "glutin", feature = "wgl")))]
+#[cfg(not(any(
+    target_arch = "wasm32",
+    feature = "glutin",
+    feature = "surfman",
+    feature = "wgl"
+)))]
 impl hal::Instance<Backend> for DummyInstance {
     fn create(_: &str, _: u32) -> Result<Self, hal::UnsupportedBackend> {
         unimplemented!()
@@ -735,130 +787,131 @@ impl hal::Instance<Backend> for DummyInstance {
     }
 }
 
+// #[cfg(not(target_arch = "wasm32"))]
+// #[derive(Debug)]
+// pub enum Instance {
+//     Headless(Headless),
+//     Surface(Surface),
+// }
 
-#[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
-#[derive(Debug)]
-pub enum Instance {
-    Headless(Headless),
-    Surface(Surface),
-}
+// impl Instance {
+//     pub fn create_surface_from_wayland(
+//         &self,
+//         display: *mut c_void,
+//         surface: *mut c_void,
+//     ) -> Surface {
+//         unimplemented!();
+//         // log::trace!("Creating GL surface from wayland");
+//         // let context = unsafe {
+//         //     glutin::ContextBuilder::new()
+//         //         .with_vsync(true)
+//         //         .build_raw_wayland_context(
+//         //             display as _,
+//         //             surface,
+//         //             /*TODO: do something with these dimensions*/
+//         //             400,
+//         //             400,
+//         //         )
+//         //         .expect("TODO: handle this error")
+//         // };
+//         // let context = unsafe { context.make_current().expect("TODO: handle this error") };
+//         // Surface::from_context(context)
+//     }
 
-use glutin::platform::unix::RawContextExt;
-impl Instance {
-    
-    pub fn create_surface_from_wayland(
-        &self,
-        display: *mut c_void,
-        surface: *mut c_void,
-    ) -> Surface {
-        log::trace!("Creating GL surface from wayland");
-        let context = unsafe {
-            glutin::ContextBuilder::new()
-                .with_vsync(true)
-                .build_raw_wayland_context(
-                    display as _,
-                    surface,
-                    /*TODO: do something with these dimensions*/
-                    400,
-                    400,
-                )
-                .expect("TODO: handle this error")
-        };
-        let context = unsafe { context.make_current().expect("TODO: handle this error") };
-        Surface::from_context(context)
-    }
+//     pub fn create_surface_from_xlib(&self, window: c_ulong, display: *mut c_void) -> Surface {
+//         unimplemented!();
+//         // log::trace!("Creating GL surface from Xlib");
+//         // let xconn = {
+//         //     // This is taken from `glutin::platform::unix::x11::XConnection::new except with tweaks
+//         //     // that allow us to create the connection with an existing display pointer
+//         //     use glutin::platform::unix::x11::{ffi, XConnection};
+//         //     // opening the libraries
+//         //     let xlib = ffi::Xlib::open().expect("TODO: Handle error");
+//         //     let xcursor = ffi::Xcursor::open().expect("TODO: Handle error");
+//         //     let xrandr = ffi::Xrandr_2_2_0::open().expect("TODO: Handle error");
+//         //     let xrandr_1_5 = ffi::Xrandr::open().ok();
+//         //     let xinput2 = ffi::XInput2::open().expect("TODO: Handle error");
+//         //     let xlib_xcb = ffi::Xlib_xcb::open().expect("TODO: Handle error");
+//         //     let xrender = ffi::Xrender::open().expect("TODO: Handle error");
 
-    pub fn create_surface_from_xlib(&self, window: c_ulong, display: *mut c_void) -> Surface {
-        log::trace!("Creating GL surface from Xlib");
-        let xconn = {
-            // This is taken from `glutin::platform::unix::x11::XConnection::new except with tweaks
-            // that allow us to create the connection with an existing display pointer
-            use glutin::platform::unix::x11::{XConnection, ffi};
-            
-            // opening the libraries
-            let xlib = ffi::Xlib::open().expect("TODO: Handle error");
-            let xcursor = ffi::Xcursor::open().expect("TODO: Handle error");
-            let xrandr = ffi::Xrandr_2_2_0::open().expect("TODO: Handle error");
-            let xrandr_1_5 = ffi::Xrandr::open().ok();
-            let xinput2 = ffi::XInput2::open().expect("TODO: Handle error");
-            let xlib_xcb = ffi::Xlib_xcb::open().expect("TODO: Handle error");
-            let xrender = ffi::Xrender::open().expect("TODO: Handle error");
+//         //     unsafe { (xlib.XInitThreads)() };
+//         //     // unsafe { (xlib.XSetErrorHandler)(error_handler) };
 
-            unsafe { (xlib.XInitThreads)() };
-            // unsafe { (xlib.XSetErrorHandler)(error_handler) };
+//         //     // Get X11 socket file descriptor
+//         //     let fd = unsafe { (xlib.XConnectionNumber)(display as *mut ffi::_XDisplay) };
 
-            // Get X11 socket file descriptor
-            let fd = unsafe { (xlib.XConnectionNumber)(display as *mut ffi::_XDisplay) };
+//         //     XConnection {
+//         //         xlib,
+//         //         xrandr,
+//         //         xrandr_1_5,
+//         //         xcursor,
+//         //         xinput2,
+//         //         xlib_xcb,
+//         //         xrender,
+//         //         display: display as _,
+//         //         x11_fd: fd,
+//         //         latest_error: parking_lot::Mutex::new(None),
+//         //         cursor_cache: Default::default(),
+//         //     }
+//         // };
+//         // let xconn = Arc::new(xconn);
 
-            XConnection {
-                xlib,
-                xrandr,
-                xrandr_1_5,
-                xcursor,
-                xinput2,
-                xlib_xcb,
-                xrender,
-                display: display as _,
-                x11_fd: fd,
-                latest_error: parking_lot::Mutex::new(None),
-                cursor_cache: Default::default(),
-            }
-        };
-        let xconn = Arc::new(xconn);
+//         // let context = unsafe {
+//         //     glutin::ContextBuilder::new()
+//         //         .with_vsync(true)
+//         //         .build_raw_x11_context(xconn, window)
+//         //         .expect("TODO: handle this error")
+//         // };
+//         // let context = unsafe { context.make_current().expect("TODO: handle this error") };
+//         // Surface::from_context(context)
+//     }
+// }
 
-        let context = unsafe {
-            glutin::ContextBuilder::new()
-                .with_vsync(true)
-                .build_raw_x11_context(
-                    xconn,
-                    window
-                )
-                .expect("TODO: handle this error")
-        };
-        let context = unsafe { context.make_current().expect("TODO: handle this error") };
-        Surface::from_context(context)
-    }
-}
+// #[cfg(not(target_arch = "wasm32"))]
+// impl hal::Instance<Backend> for Instance {
+//     fn create(name: &str, version: u32) -> Result<Instance, hal::UnsupportedBackend> {
+//         Headless::create(name, version).map(Instance::Headless)
+//     }
 
-#[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
-impl hal::Instance<Backend> for Instance {
-    fn create(name: &str, version: u32) -> Result<Instance, hal::UnsupportedBackend> {
-        Headless::create(name, version)
-            .map(Instance::Headless)
-    }
+//     fn enumerate_adapters(&self) -> Vec<adapter::Adapter<Backend>> {
+//         match self {
+//             Instance::Headless(instance) => instance.enumerate_adapters(),
+//             Instance::Surface(instance) => instance.enumerate_adapters(),
+//         }
+//     }
 
-    fn enumerate_adapters(&self) -> Vec<adapter::Adapter<Backend>> {
-        match self {
-            Instance::Headless(instance) => instance.enumerate_adapters(),
-            Instance::Surface(instance) => instance.enumerate_adapters(),
-        }
-    }
+//     unsafe fn create_surface(
+//         &self,
+//         has_handle: &impl raw_window_handle::HasRawWindowHandle,
+//     ) -> Result<Surface, hal::window::InitError> {
+//         match self {
+//             Instance::Headless(instance) => instance.create_surface(has_handle),
+//             Instance::Surface(instance) => instance.create_surface(has_handle),
+//         }
+//         // use raw_window_handle::RawWindowHandle;
 
-    unsafe fn create_surface(
-        &self,
-        has_handle: &impl raw_window_handle::HasRawWindowHandle,
-    ) -> Result<Surface, hal::window::InitError> {
-        use raw_window_handle::RawWindowHandle;
+//         // match has_handle.raw_window_handle() {
+//         //     #[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
+//         //     RawWindowHandle::Wayland(handle) => {
+//         //         Ok(self.create_surface_from_wayland(handle.display, handle.surface))
+//         //     }
+//         //     #[cfg(all(
+//         //         feature = "x11",
+//         //         unix,
+//         //         not(target_os = "android"),
+//         //         not(target_os = "macos")
+//         //     ))]
+//         //     RawWindowHandle::Xlib(handle) => {
+//         //         Ok(self.create_surface_from_xlib(handle.display as *mut _, handle.window))
+//         //     }
+//         //     _ => Err(hal::window::InitError::UnsupportedWindowHandle),
+//         // }
+//     }
 
-        match has_handle.raw_window_handle() {
-            #[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
-            RawWindowHandle::Wayland(handle) => {
-                Ok(self.create_surface_from_wayland(handle.display, handle.surface))
-            }
-            #[cfg(all(
-                feature = "x11",
-                unix,
-                not(target_os = "android"),
-                not(target_os = "macos")
-            ))]
-            RawWindowHandle::Xlib(handle) => {
-                Ok(self.create_surface_from_xlib(handle.display as *mut _, handle.window))
-            }
-            _ => Err(hal::window::InitError::UnsupportedWindowHandle),
-        }
-    }
-
-    unsafe fn destroy_surface(&self, _surface: Surface) {
-        // TODO: Implement Surface cleanup
-    }
-}
+//     unsafe fn destroy_surface(&self, surface: Surface) {
+//         match self {
+//             Instance::Headless(instance) => instance.destroy_surface(surface),
+//             Instance::Surface(instance) => instance.destroy_surface(surface),
+//         }
+//     }
+// }
