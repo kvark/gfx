@@ -92,7 +92,10 @@ impl GlContainer {
         #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
         {
             if let Some((device, context)) = &self.surfman_data {
-                device.write().make_context_current(&context.read());
+                device
+                    .write()
+                    .make_context_current(&context.read())
+                    .expect("TODO");
             }
         }
     }

@@ -193,10 +193,10 @@ impl hal::Instance<B> for Instance {
         self.device.write().destroy_surface(
             &mut surface.context.write(),
             Starc::get_mut(&mut surface.surface).expect("TODO"),
-        );
+        ).expect("TODO");
         self.device
             .write()
-            .destroy_context(&mut surface.context.write());
+            .destroy_context(&mut surface.context.write()).expect("TODO");
     }
 }
 
