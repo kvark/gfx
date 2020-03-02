@@ -1,13 +1,13 @@
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "glutin"))]
+#[cfg(feature = "glutin")]
 pub mod glutin;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+#[cfg(feature = "surfman")]
 pub mod surfman;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "wgl"))]
+#[cfg(feature = "wgl")]
 pub mod wgl;
 
 #[cfg(not(any(
