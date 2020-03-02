@@ -76,7 +76,7 @@ type ColorSlot = u8;
 pub(crate) struct GlContainer {
     context: GlContext,
 
-    /// In order to set the current context we must have access to the instance
+    /// In order to set the current context we must have access the surfman device and context
     #[cfg(feature = "surfman")]
     surfman_data: Option<(
         Starc<RwLock<surfman::Device>>,
@@ -111,7 +111,7 @@ impl GlContainer {
     }
 
     #[cfg(feature = "surfman")]
-    fn set_instance(
+    fn set_surfman_data(
         &mut self,
         device: Starc<RwLock<surfman::Device>>,
         context: Starc<RwLock<surfman::Context>>,

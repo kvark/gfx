@@ -88,7 +88,7 @@ pub struct Instance {
     pub(crate) connection: Starc<surfman::Connection>,
     /// Instance context. This context is not used for rendering, but is used when enumerating
     /// adapters.
-    pub(crate) context: Starc<surfman::Context>,
+    pub(crate) context: Starc<RwLock<surfman::Context>>,
 }
 
 impl Instance {
@@ -162,7 +162,7 @@ impl hal::Instance<B> for Instance {
         Ok(Instance {
             device: Starc::new(RwLock::new(device)),
             connection: Starc::new(connection),
-            context: Starc::new(context),
+            context: Starc::new(RwLock::new(context)),
         })
     }
 
@@ -171,8 +171,11 @@ impl hal::Instance<B> for Instance {
         let mut gl = GlContainer::from_fn_proc(|symbol_name| {
             self.device
                 .write()
-                .get_proc_address(&self.context, symbol_name) as *const _
+                .get_proc_address(&self.context.read(), symbol_name) as *const _
         });
+
+        // Add extra surfman data so that the GlContainer make the context current when it needs to
+        gl.set_surfman_data(self.device.clone(), self.context.clone());
 
         // Create physical device
         let adapter = PhysicalDevice::new_adapter((), gl);
