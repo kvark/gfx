@@ -91,6 +91,54 @@ pub struct Instance {
     pub(crate) context: Starc<surfman::Context>,
 }
 
+impl Instance {
+    pub unsafe fn create_surface_from_rwh(
+        &self,
+        raw_handle: raw_window_handle::RawWindowHandle,
+    ) -> Surface {
+        // Create a context for the surface
+        let context_attributes = surfman::ContextAttributes {
+            version: surfman::GLVersion::new(3, 3), // TODO: Figure out how to determine GL version
+            flags: surfman::ContextAttributeFlags::empty(),
+        };
+        let context_descriptor = self
+            .device
+            .write()
+            .create_context_descriptor(&context_attributes)
+            .expect("TODO");
+        let context = self
+            .device
+            .write()
+            .create_context(&context_descriptor)
+            .expect("TODO");
+
+        // Create the surface with the context
+        let surface = self
+            .device
+            .write()
+            .create_surface(
+                &context,
+                surfman::SurfaceAccess::GPUOnly,
+                surfman::SurfaceType::Widget {
+                    // Create a native widget for the raw window handle
+                    native_widget: self
+                        .connection
+                        .create_native_widget_from_rwh(raw_handle)
+                        .expect("TODO"),
+                },
+            )
+            .expect("TODO");
+
+        // Create a surface with the given context
+        Surface {
+            renderbuffer: None,
+            swapchain: None,
+            context: Starc::new(RwLock::new(context)),
+            surface: Starc::new(surface),
+        }
+    }
+}
+
 impl hal::Instance<B> for Instance {
     fn create(_: &str, _: u32) -> Result<Self, hal::UnsupportedBackend> {
         // TODO: I think this technically assumes that the default `surfman` device will match
@@ -135,43 +183,7 @@ impl hal::Instance<B> for Instance {
         &self,
         has_handle: &impl raw_window_handle::HasRawWindowHandle,
     ) -> Result<Surface, window::InitError> {
-        // Create a context for the surface
-        let context_attributes = surfman::ContextAttributes {
-            version: surfman::GLVersion::new(3, 3), // TODO: Figure out how to determine GL version
-            flags: surfman::ContextAttributeFlags::empty(),
-        };
-        let context_descriptor = self
-            .device
-            .write()
-            .create_context_descriptor(&context_attributes)
-            .expect("TODO");
-        let context = self
-            .device
-            .write()
-            .create_context(&context_descriptor)
-            .expect("TODO");
-
-        // Create the surface with the context
-        let surface = self
-            .device
-            .write()
-            .create_surface(
-                &context,
-                surfman::SurfaceAccess::GPUOnly,
-                surfman::SurfaceType::Widget {
-                    // Create a native widget for the raw window handle
-                    native_widget: self.connection.create_native_widget_from_rwh(has_handle),
-                },
-            )
-            .expect("TODO");
-
-        // Create a surface with the given context
-        Ok(Surface {
-            renderbuffer: None,
-            swapchain: None,
-            context: Starc::new(RwLock::new(context)),
-            surface: Starc::new(surface),
-        })
+        Ok(self.create_surface_from_rwh(has_handle.raw_window_handle()))
     }
 
     unsafe fn destroy_surface(&self, mut surface: Surface) {
@@ -308,12 +320,12 @@ impl window::Surface<B> for Surface {
             // } else {
             //     1..=1
             // },
-            image_count: 1..=1,
+            image_count: 1 ..= 1,
             current_extent: None,
             extents: window::Extent2D {
                 width: 4,
                 height: 4,
-            }..=window::Extent2D {
+            } ..= window::Extent2D {
                 width: 4096,
                 height: 4096,
             },
