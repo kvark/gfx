@@ -3,6 +3,15 @@
 
 #![allow(missing_docs, missing_copy_implementations)]
 
+// Check for incompatible feature combinations
+#[cfg(all(
+    target_arch = "wasm32",
+    any(feature = "glutin", feature = "surfman", feature = "wgl")
+))]
+compile_error!(
+    "The `glutin`, `surfman`, and `wgl` features are incompatible with the `wasm32` target."
+);
+
 #[macro_use]
 extern crate bitflags;
 #[macro_use]
@@ -37,17 +46,17 @@ mod window;
 pub use window::web::{Surface, Swapchain};
 
 // Glutin implementation
-#[cfg(all(not(target_arch = "wasm32"), feature = "glutin"))]
+#[cfg(feature = "glutin")]
 pub use crate::window::glutin::{Instance, Surface, Swapchain};
 
 // Surfman implementation
-#[cfg(all(feature = "surfman", not(target_arch = "wasm32")))]
+#[cfg(feature = "surfman")]
 pub use crate::window::surfman::{Instance, Surface, Swapchain};
 
 // WGL implementation
-#[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
+#[cfg(feature = "wgl")]
 use window::wgl::DeviceContext;
-#[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
+#[cfg(feature = "wgl")]
 pub use window::wgl::{Instance, Surface, Swapchain};
 
 // Catch-all dummy implementation
@@ -68,7 +77,7 @@ pub(crate) struct GlContainer {
     context: GlContext,
 
     /// In order to set the current context we must have access to the instance
-    #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+    #[cfg(feature = "surfman")]
     surfman_data: Option<(
         Starc<RwLock<surfman::Device>>,
         Starc<RwLock<surfman::Context>>,
@@ -101,7 +110,7 @@ impl GlContainer {
         }
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+    #[cfg(feature = "surfman")]
     fn set_instance(
         &mut self,
         device: Starc<RwLock<surfman::Device>>,
@@ -156,7 +165,7 @@ impl hal::Backend for Backend {
         not(target_arch = "wasm32"),
         any(feature = "glutin", feature = "surfman", feature = "wgl")
     ))]
-    type Instance = Instance;
+    type Instance = Surface;
 
     #[cfg(target_arch = "wasm32")]
     type Instance = Surface;
