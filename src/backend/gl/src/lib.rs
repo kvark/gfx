@@ -108,7 +108,7 @@ impl GlContainer {
         let context = glow::Context::from_loader_function(fn_proc);
         GlContainer {
             context,
-            #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+            #[cfg(feature = "surfman")]
             surfman_data: None,
         }
     }
@@ -456,7 +456,7 @@ unsafe impl<T: ?Sized> Sync for Wstarc<T> {}
 #[derive(Debug)]
 pub struct PhysicalDevice(Starc<Share>);
 
-#[cfg(any(target_arch = "wasm32", not(feature = "wgl")))]
+#[cfg(not(feature = "wgl"))]
 type DeviceContext = ();
 
 impl PhysicalDevice {

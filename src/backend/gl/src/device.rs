@@ -1861,7 +1861,7 @@ impl d::Device<B> for Device {
     ) -> Result<(Swapchain, Vec<n::Image>), hal::window::CreationError> {
         let gl = &self.share.context;
 
-        #[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
+        #[cfg(feature = "wgl")]
         let context = {
             use crate::window::wgl::PresentContext;
 
@@ -1935,7 +1935,7 @@ impl d::Device<B> for Device {
         };
 
         // Glutin
-        #[cfg(all(not(target_arch = "wasm32"), feature = "glutin"))]
+        #[cfg(feature = "glutin")]
         let swapchain = Swapchain {
             fbos,
             extent: config.extent,
@@ -1949,7 +1949,7 @@ impl d::Device<B> for Device {
         };
 
         // Surfman
-        #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+        #[cfg(feature = "surfman")]
         let swapchain = Swapchain {
             fbos,
             extent: config.extent,
@@ -1958,7 +1958,7 @@ impl d::Device<B> for Device {
         };
 
         // WGL
-        #[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
+        #[cfg(feature = "wgl")]
         let swapchain = {
             self.share.instance_context.make_current();
             Swapchain {

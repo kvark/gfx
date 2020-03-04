@@ -216,18 +216,7 @@ impl CommandQueue {
         unsafe {
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(swapchain.fbos[index as usize]));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
-            gl.blit_framebuffer(
-                0,
-                0,
-                extent.width as _,
-                extent.height as _,
-                0,
-                0,
-                extent.width as _,
-                extent.height as _,
-                glow::COLOR_BUFFER_BIT,
-                glow::LINEAR,
-            );
+            // gl.blit_framebuffer(
         }
 
         #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
@@ -1144,7 +1133,7 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
             self.present_by_copy(swapchain.borrow(), index);
         }
 
-        #[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
+        #[cfg(feature = "wgl")]
         self.share.instance_context.make_current();
 
         Ok(None)
@@ -1162,7 +1151,7 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
             .expect("No swapchain is configured!");
         self.present_by_copy(swapchain, 0);
 
-        #[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
+        #[cfg(feature = "wgl")]
         self.share.instance_context.make_current();
 
         Ok(None)
