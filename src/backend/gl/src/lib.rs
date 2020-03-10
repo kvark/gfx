@@ -52,6 +52,11 @@ pub use crate::window::glutin::{Instance, Surface, Swapchain};
 // Surfman implementation
 #[cfg(feature = "surfman")]
 pub use crate::window::surfman::{Instance, Surface, Swapchain};
+#[cfg(feature = "surfman")]
+use surfman::declare_surfman;
+// Helps windows detect discrete GPUs
+#[cfg(feature = "surfman")]
+declare_surfman!();
 
 // WGL implementation
 #[cfg(feature = "wgl")]
@@ -76,12 +81,11 @@ type ColorSlot = u8;
 pub(crate) struct GlContainer {
     context: GlContext,
 
-    /// In order to set the current context we must have access the surfman device and context
     #[cfg(feature = "surfman")]
-    surfman_data: Option<(
-        Starc<RwLock<surfman::Device>>,
-        Starc<RwLock<surfman::Context>>,
-    )>,
+    surfman_device: Starc<RwLock<surfman::Device>>,
+
+    #[cfg(feature = "surfman")]
+    surfman_context: Starc<RwLock<surfman::Context>>,
 }
 
 impl GlContainer {
@@ -89,37 +93,39 @@ impl GlContainer {
     fn make_current(&self) {
         // TODO: Implement `make_current()` for other backends
 
-        #[cfg(all(not(target_arch = "wasm32"), feature = "surfman"))]
+        #[cfg(feature = "surfman")]
         {
-            if let Some((device, context)) = &self.surfman_data {
-                device
-                    .write()
-                    .make_context_current(&context.read())
-                    .expect("TODO");
-            }
+            self.surfman_device
+                .write()
+                .make_context_current(&self.surfman_context.read())
+                .expect("TODO");
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", feature = "surfman")))]
     fn from_fn_proc<F>(fn_proc: F) -> GlContainer
+    where
+        F: FnMut(&str) -> *const std::os::raw::c_void,
+    {
+        let context = glow::Context::from_loader_function(fn_proc);
+        GlContainer { context }
+    }
+
+    #[cfg(feature = "surfman")]
+    fn from_fn_proc<F>(
+        fn_proc: F,
+        surfman_device: Starc<RwLock<surfman::Device>>,
+        surfman_context: Starc<RwLock<surfman::Context>>,
+    ) -> GlContainer
     where
         F: FnMut(&str) -> *const std::os::raw::c_void,
     {
         let context = glow::Context::from_loader_function(fn_proc);
         GlContainer {
             context,
-            #[cfg(feature = "surfman")]
-            surfman_data: None,
+            surfman_device,
+            surfman_context,
         }
-    }
-
-    #[cfg(feature = "surfman")]
-    fn set_surfman_data(
-        &mut self,
-        device: Starc<RwLock<surfman::Device>>,
-        context: Starc<RwLock<surfman::Context>>,
-    ) {
-        self.surfman_data = Some((device, context));
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -157,6 +163,16 @@ impl Deref for GlContainer {
         #[cfg(not(target_arch = "wasm32"))]
         self.make_current();
         &self.context
+    }
+}
+
+#[cfg(feature = "surfman")]
+impl Drop for GlContainer {
+    fn drop(&mut self) {
+        // Contexts must be manually destroyed to prevent a panic
+        self.surfman_device
+            .read()
+            .destroy_context(&mut self.surfman_context.write());
     }
 }
 

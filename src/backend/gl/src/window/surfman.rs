@@ -1,51 +1,4 @@
-//! Window creation using glutin for gfx.
-//!
-//! # Examples
-//!
-//! The following code creates a `gfx::Surface` using glutin.
-//!
-//! ```no_run
-//! extern crate glutin;
-//! extern crate gfx_backend_gl;
-//!
-//! fn main() {
-//!     use gfx_backend_gl::Surface;
-//!     use glutin::{ContextBuilder, WindowedContext};
-//!     use glutin::window::WindowBuilder;
-//!     use glutin::event_loop::EventLoop;
-//!
-//!     // First create a window using glutin.
-//!     let mut events_loop = EventLoop::new();
-//!     let wb = WindowBuilder::new();
-//!     let glutin_window = ContextBuilder::new().with_vsync(true).build_windowed(wb, &events_loop).unwrap();
-//!     let (glutin_context, glutin_window) = unsafe { glutin_window.make_current().expect("Failed to make the context current").split() };
-//!
-//!     // Then use the glutin window to create a gfx surface.
-//!     let surface = Surface::from_context(glutin_context);
-//! }
-//! ```
-//!
-//! Headless initialization without a window.
-//!
-//! ```no_run
-//! extern crate glutin;
-//! extern crate gfx_backend_gl;
-//! extern crate gfx_hal;
-//!
-//! use gfx_hal::Instance;
-//! use gfx_backend_gl::Headless;
-//! use glutin::{Context, ContextBuilder};
-//! use glutin::event_loop::EventLoop;
-//!
-//! fn main() {
-//!     let events_loop = EventLoop::new();
-//!     let context = ContextBuilder::new().build_headless(&events_loop, glutin::dpi::PhysicalSize::new(0.0, 0.0))
-//!         .expect("Failed to build headless context");
-//!     let context = unsafe { context.make_current() }.expect("Failed to make the context current");
-//!     let headless = Headless::from_context(context);
-//!     let _adapters = headless.enumerate_adapters();
-//! }
-//! ```
+//! [Surfman](https://github.com/pcwalton/surfman)-based OpenGL backend for GFX-hal
 
 use crate::{conv, native, Backend as B, Device, GlContainer, PhysicalDevice, QueueFamily, Starc};
 use hal::{adapter::Adapter, format as f, image, window};
@@ -53,14 +6,16 @@ use hal::{adapter::Adapter, format as f, image, window};
 use arrayvec::ArrayVec;
 use glow::HasContext;
 use parking_lot::RwLock;
-use surfman;
+use surfman as sm;
 
+use std::cell::RefCell;
+use std::fmt;
 use std::iter;
 
 #[derive(Debug)]
 pub struct Swapchain {
     // Underlying window, required for presentation
-    pub(crate) context: Starc<RwLock<surfman::Context>>,
+    pub(crate) context: Starc<RwLock<sm::Context>>,
     // Extent because the window lies
     pub(crate) extent: window::Extent2D,
     ///
@@ -79,52 +34,65 @@ impl window::Swapchain<B> for Swapchain {
     }
 }
 
-#[derive(Debug)]
+thread_local! {
+    /// The thread-local surfman connection
+    static SM_CONN: RefCell<sm::Connection> =
+        RefCell::new(sm::Connection::new().expect("TODO"));
+}
+
 pub struct Instance {
-    /// The surfman device. This is needed to create contexts, sufaces, etc. and make changes to
-    /// them.
-    pub(crate) device: Starc<RwLock<surfman::Device>>,
-    /// The connection used by the surfman device
-    pub(crate) connection: Starc<surfman::Connection>,
-    /// Instance context. This context is not used for rendering, but is used when enumerating
-    /// adapters.
-    pub(crate) context: Starc<RwLock<surfman::Context>>,
+    hardware_adapter: sm::Adapter,
+    low_power_adapter: sm::Adapter,
+    software_adapter: sm::Adapter,
+}
+
+impl fmt::Debug for Instance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Instance").field(&["Adapter..."; 3]).finish()
+    }
 }
 
 impl Instance {
+    fn get_default_context_attributes() -> sm::ContextAttributes {
+        sm::ContextAttributes {
+            version: surfman::GLVersion::new(3, 3), // TODO: Figure out how to determine GL version
+            flags: surfman::ContextAttributeFlags::empty(),
+        }
+    }
+
     pub unsafe fn create_surface_from_rwh(
         &self,
         raw_handle: raw_window_handle::RawWindowHandle,
     ) -> Surface {
-        // Create a context for the surface
-        let context_attributes = surfman::ContextAttributes {
-            version: surfman::GLVersion::new(3, 3), // TODO: Figure out how to determine GL version
-            flags: surfman::ContextAttributeFlags::empty(),
-        };
-        let context_descriptor = self
-            .device
-            .write()
-            .create_context_descriptor(&context_attributes)
-            .expect("TODO");
-        let context = self
-            .device
-            .write()
-            .create_context(&context_descriptor)
+        // Get context attributes
+        let context_attributes = Self::get_default_context_attributes();
+
+        // Open a device for the surface
+        // TODO: Assume hardware adapter
+        let mut device = SM_CONN
+            .with(|c| c.borrow().create_device(&self.hardware_adapter))
             .expect("TODO");
 
+        // Create context descriptor
+        let context_descriptor = device
+            .create_context_descriptor(&context_attributes)
+            .expect("TODO");
+
+        // Create context
+        let context = device.create_context(&context_descriptor).expect("TODO");
+
         // Create the surface with the context
-        let surface = self
-            .device
-            .write()
+        let surface = device
             .create_surface(
                 &context,
                 surfman::SurfaceAccess::GPUOnly,
                 surfman::SurfaceType::Widget {
                     // Create a native widget for the raw window handle
-                    native_widget: self
-                        .connection
-                        .create_native_widget_from_rwh(raw_handle)
-                        .expect("TODO"),
+                    native_widget: SM_CONN.with(|c| {
+                        c.borrow()
+                            .create_native_widget_from_rwh(raw_handle)
+                            .expect("TODO")
+                    }),
                 },
             )
             .expect("TODO");
@@ -134,52 +102,67 @@ impl Instance {
             renderbuffer: None,
             swapchain: None,
             context: Starc::new(RwLock::new(context)),
-            surface: Starc::new(surface),
+            surface: Starc::new(RwLock::new(surface)),
+            device: Starc::new(RwLock::new(device)),
         }
     }
 }
 
 impl hal::Instance<B> for Instance {
     fn create(_: &str, _: u32) -> Result<Self, hal::UnsupportedBackend> {
-        // TODO: I think this technically assumes that the default `surfman` device will match
-        // the device type, i.e. x11 or wayland, of the raw window handle passed into
-        // `create_surface`. This may be a fairly reasonable assumption, but that should be
-        // verified.
-        let connection = surfman::Connection::new().expect("TODO");
-        let mut device = connection
-            .create_device(&connection.create_hardware_adapter().expect("TODO"))
-            .expect("TODO");
-
-        let context_attributes = surfman::ContextAttributes {
-            version: surfman::GLVersion::new(3, 3), // TODO: Figure out how to determine GL version
-            flags: surfman::ContextAttributeFlags::empty(),
-        };
-        let context_descriptor = device
-            .create_context_descriptor(&context_attributes)
-            .expect("TODO");
-        let context = device.create_context(&context_descriptor).expect("TODO");
-
         Ok(Instance {
-            device: Starc::new(RwLock::new(device)),
-            connection: Starc::new(connection),
-            context: Starc::new(RwLock::new(context)),
+            hardware_adapter: SM_CONN.with(|c| c.borrow().create_hardware_adapter().expect("TODO")),
+            low_power_adapter: SM_CONN
+                .with(|c| c.borrow().create_low_power_adapter().expect("TODO")),
+            software_adapter: SM_CONN.with(|c| c.borrow().create_software_adapter().expect("TODO")),
         })
     }
 
     fn enumerate_adapters(&self) -> Vec<Adapter<B>> {
-        // Create gl container
-        let mut gl = GlContainer::from_fn_proc(|symbol_name| {
-            self.device
-                .write()
-                .get_proc_address(&self.context.read(), symbol_name) as *const _
-        });
+        let mut adapters = Vec::with_capacity(3);
 
-        // Add extra surfman data so that the GlContainer make the context current when it needs to
-        gl.set_surfman_data(self.device.clone(), self.context.clone());
+        let context_attributes = Self::get_default_context_attributes();
 
-        // Create physical device
-        let adapter = PhysicalDevice::new_adapter((), gl);
-        vec![adapter]
+        for surfman_adapter in &[
+            &self.hardware_adapter,
+            &self.low_power_adapter,
+            &self.software_adapter,
+        ] {
+            // Create a surfman device
+            let mut device =
+                SM_CONN.with(|c| c.borrow().create_device(surfman_adapter).expect("TODO"));
+
+            // Create context descriptor
+            let context_descriptor = device
+                .create_context_descriptor(&context_attributes)
+                .expect("TODO");
+
+            // Create context
+            let context = device.create_context(&context_descriptor).expect("TODO");
+
+            // Wrap in Starc<RwLock<T>>
+            let context = Starc::new(RwLock::new(context));
+            let context_ = context.clone();
+            let device = Starc::new(RwLock::new(device));
+            let device_ = device.clone();
+
+            // Create gl container
+            let gl = GlContainer::from_fn_proc(
+                |symbol_name| {
+                    device_
+                        .write()
+                        .get_proc_address(&context_.read(), symbol_name)
+                        as *const _
+                },
+                device,
+                context,
+            );
+
+            // Create physical device
+            adapters.push(PhysicalDevice::new_adapter((), gl));
+        }
+
+        adapters
     }
 
     unsafe fn create_surface(
@@ -189,38 +172,27 @@ impl hal::Instance<B> for Instance {
         Ok(self.create_surface_from_rwh(has_handle.raw_window_handle()))
     }
 
-    unsafe fn destroy_surface(&self, mut surface: Surface) {
-        self.device.write().destroy_surface(
-            &mut surface.context.write(),
-            Starc::get_mut(&mut surface.surface).expect("TODO"),
-        ).expect("TODO");
-        self.device
-            .write()
-            .destroy_context(&mut surface.context.write()).expect("TODO");
+    unsafe fn destroy_surface(&self, surface: Surface) {
+        // Surface implments Drop and will clean up the surface when it gets dropped
+        drop(surface);
     }
 }
 
-//TODO: if we make `Surface` a `WindowBuilder` instead of `RawContext`,
+// TODO: Not sure if this TODO is relevant with surfman.
+// TODO: if we make `Surface` a `WindowBuilder` instead of `RawContext`,
 // we could spawn window + GL context when a swapchain is requested
 // and actually respect the swapchain configuration provided by the user.
 #[derive(Debug)]
 pub struct Surface {
-    pub(crate) surface: Starc<surfman::Surface>,
-    pub(crate) context: Starc<RwLock<surfman::Context>>,
     pub(crate) swapchain: Option<Swapchain>,
+    pub(crate) context: Starc<RwLock<sm::Context>>,
+    surface: Starc<RwLock<sm::Surface>>,
+    device: Starc<RwLock<sm::Device>>,
     renderbuffer: Option<native::Renderbuffer>,
 }
 
 impl Surface {
-    // pub fn from_context(context: surfman::Context) -> Self {
-    //     Surface {
-    //         renderbuffer: None,
-    //         swapchain: None,
-    //         context: Starc::new(context),
-    //     }
-    // }
-
-    pub fn context(&self) -> Starc<RwLock<surfman::Context>> {
+    pub fn context(&self) -> Starc<RwLock<sm::Context>> {
         self.context.clone()
     }
 
@@ -238,6 +210,15 @@ impl Surface {
         // }
         // TODO: Figure out how to get pixel format from surfman
         vec![f::Format::Rgba8Srgb, f::Format::Bgra8Srgb]
+    }
+}
+
+impl Drop for Surface {
+    fn drop(&mut self) {
+        // Destroy the underlying surface
+        self.device
+            .read()
+            .destroy_surface(&mut self.context.write(), &mut self.surface.write());
     }
 }
 
@@ -323,12 +304,12 @@ impl window::Surface<B> for Surface {
             // } else {
             //     1..=1
             // },
-            image_count: 1 ..= 1,
+            image_count: 1..=1,
             current_extent: None,
             extents: window::Extent2D {
                 width: 4,
                 height: 4,
-            } ..= window::Extent2D {
+            }..=window::Extent2D {
                 width: 4096,
                 height: 4096,
             },
@@ -341,85 +322,3 @@ impl window::Surface<B> for Surface {
         Some(self.swapchain_formats())
     }
 }
-
-// pub fn config_context<C>(
-//     builder: glutin::ContextBuilder<C>,
-//     color_format: f::Format,
-//     ds_format: Option<f::Format>,
-// ) -> glutin::ContextBuilder<C>
-// where
-//     C: glutin::ContextCurrentState,
-// {
-//     let color_base = color_format.base_format();
-//     let color_bits = color_base.0.describe_bits();
-//     let depth_bits = match ds_format {
-//         Some(fm) => fm.base_format().0.describe_bits(),
-//         None => f::BITS_ZERO,
-//     };
-//     builder
-//         .with_depth_buffer(depth_bits.depth)
-//         .with_stencil_buffer(depth_bits.stencil)
-//         .with_pixel_format(color_bits.color, color_bits.alpha)
-//         .with_srgb(color_base.1 == f::ChannelType::Srgb)
-// }
-
-// #[derive(Debug)]
-// pub struct Headless {
-//     pub context: Starc<surfman::Context>,
-//     pub device: Starc<surfman::Device>,
-// }
-
-// impl hal::Instance<B> for Headless {
-//     fn create(_: &str, _: u32) -> Result<Self, hal::UnsupportedBackend> {
-//         use surfman::{
-//             Adapter, Connection, ContextAttributeFlags, ContextAttributes, Device, GLVersion,
-//         };
-//         let connection = Connection::new().expect("TODO");
-//         let device = Device::new(&connection, &Adapter::hardware().expect("TODO"));
-//         let context_attributes = ContextAttributes {
-//             version: GLVersion::new(3, 3),
-//             flags: ContextAttributeFlags::empty(),
-//         };
-//         let context_descriptor = device
-//             .create_context_descriptor(&context_attributes)
-//             .expect("TODO");
-//         let context = device.create_context(&context_descriptor).expect("TODO");
-
-//         Ok(Headless {
-//             device: Starc::new(device),
-//             context: Starc::new(context),
-//         })
-//     }
-
-//     fn enumerate_adapters(&self) -> Vec<Adapter<B>> {
-//         let adapter = PhysicalDevice::new_adapter(
-//             (),
-//             GlContainer::from_fn_proc(|s| self.0.get_proc_address(s) as *const _),
-//         );
-//         vec![adapter]
-//     }
-
-//     unsafe fn create_surface(
-//         &self,
-//         _: &impl raw_window_handle::HasRawWindowHandle,
-//     ) -> Result<Surface, window::InitError> {
-//         use surfman::{SurfaceAccess, SurfaceType};
-//         let surface = self
-//             .device
-//             .create_surface(
-//                 &self.context,
-//                 SurfaceAccess::GPUOnly,
-//                 &SurfaceType::Generic {
-//                     // TODO: Make headless surface size configurable
-//                     size: euclid::default::Size2D::new(640, 480),
-//                 },
-//             )
-//             .expect("TODO");
-
-//         Ok(surface)
-//     }
-
-//     unsafe fn destroy_surface(&self, surface: Surface) {
-//         self.device.destroy_surface(&self.context, surface);
-//     }
-// }

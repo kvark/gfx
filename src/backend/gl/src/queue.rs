@@ -216,12 +216,24 @@ impl CommandQueue {
         unsafe {
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(swapchain.fbos[index as usize]));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
-            // gl.blit_framebuffer(
+            gl.blit_framebuffer(
+                0,
+                0,
+                extent.width as _,
+                extent.height as _,
+                0,
+                0,
+                extent.width as _,
+                extent.height as _,
+                glow::COLOR_BUFFER_BIT,
+                glow::LINEAR,
+            );
         }
 
-        #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
+        #[cfg(feature = "glutin")]
         swapchain.context.swap_buffers().unwrap();
-        #[cfg(all(feature = "wgl", not(target_arch = "wasm32")))]
+
+        #[cfg(feature = "wgl")]
         swapchain.swap_buffers();
     }
 
