@@ -20,6 +20,7 @@ pub struct Swapchain {
     pub(crate) extent: window::Extent2D,
     ///
     pub(crate) fbos: ArrayVec<[native::RawFrameBuffer; 3]>,
+    pub(crate) out_fbo: Option<native::RawFrameBuffer>,
 }
 
 impl window::Swapchain<B> for Swapchain {
@@ -247,7 +248,8 @@ impl window::PresentationSurface<B> for Surface {
             config.extent.height as i32,
         );
 
-        let fbo = surface_info.framebuffer_object;
+        // let fbo = surface_info.framebuffer_object;
+        let fbo = gl.create_framebuffer().unwrap();
         gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(fbo));
         gl.framebuffer_renderbuffer(
             glow::READ_FRAMEBUFFER,
@@ -259,6 +261,7 @@ impl window::PresentationSurface<B> for Surface {
             context: self.context.clone(),
             extent: config.extent,
             fbos: iter::once(fbo).collect(),
+            out_fbo: Some(surface_info.framebuffer_object),
         });
 
         Ok(())

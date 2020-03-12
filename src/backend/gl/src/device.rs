@@ -1859,6 +1859,7 @@ impl d::Device<B> for Device {
         config: SwapchainConfig,
         _old_swapchain: Option<Swapchain>,
     ) -> Result<(Swapchain, Vec<n::Image>), hal::window::CreationError> {
+
         let gl = &self.share.context;
 
         #[cfg(feature = "wgl")]
@@ -1955,6 +1956,7 @@ impl d::Device<B> for Device {
             extent: config.extent,
             // TODO: Resize the context to the extent
             context: surface.context.clone(),
+            out_fbo: None,
         };
 
         // WGL
