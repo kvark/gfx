@@ -203,12 +203,17 @@ impl CommandQueue {
 
         #[cfg(feature = "wgl")]
         swapchain.make_current();
+        #[cfg(feature = "surfman")]
+        gl.surfman_device
+            .write()
+            .make_context_current(&swapchain.context.read())
+            .unwrap();
 
         unsafe {
             trace!("Out FBO: {:?}", swapchain.out_fbo);
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(swapchain.fbos[index as usize]));
-            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, swapchain.out_fbo);
-            gl.blit_framebuffer(
+            gl.context.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(swapchain.fbos[index as usize]));
+            gl.context.bind_framebuffer(glow::DRAW_FRAMEBUFFER, swapchain.out_fbo);
+            gl.context.blit_framebuffer(
                 0,
                 0,
                 extent.width as _,
@@ -224,7 +229,6 @@ impl CommandQueue {
 
         #[cfg(feature = "glutin")]
         swapchain.context.swap_buffers().unwrap();
-
         #[cfg(feature = "wgl")]
         swapchain.swap_buffers();
     }

@@ -111,7 +111,7 @@ fn main() {
         .with_title("quad".to_string());
 
     // instantiate backend
-    #[cfg(not(feature = "gl"))]
+//    #[cfg(not(feature = "gl"))]
     let (_window, instance, mut adapters, surface) = {
         let window = wb.build(&event_loop).unwrap();
         let instance = back::Instance::create("gfx-rs quad", 1)
@@ -123,7 +123,7 @@ fn main() {
         // Return `window` so it is not dropped: dropping it invalidates `surface`.
         (window, Some(instance), adapters, surface)
     };
-    #[cfg(feature = "gl")]
+/*    #[cfg(feature = "gl")]
     let (window, instance, mut adapters, surface) = {
         #[cfg(not(target_arch = "wasm32"))]
         let (window, surface) = {
@@ -151,7 +151,7 @@ fn main() {
         let adapters = surface.enumerate_adapters();
         (window, None, adapters, surface)
     };
-
+*/
     for adapter in &adapters {
         println!("{:?}", adapter.info);
     }
@@ -182,11 +182,12 @@ fn main() {
                 } => *control_flow = winit::event_loop::ControlFlow::Exit,
                 winit::event::WindowEvent::Resized(dims) => {
                     println!("resized to {:?}", dims);
+                    /*
                     #[cfg(all(feature = "gl", not(target_arch = "wasm32")))]
                     {
                         let context = renderer.surface.context();
                         context.resize(dims.to_physical(window.hidpi_factor()));
-                    }
+                    }*/
                     renderer.dimensions = window::Extent2D {
                         width: (dims.width * dpi) as u32,
                         height: (dims.height * dpi) as u32,
