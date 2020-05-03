@@ -111,7 +111,6 @@ fn main() {
         .with_title("quad".to_string());
 
     // instantiate backend
-    #[cfg(not(feature = "gl"))]
     let (_window, instance, mut adapters, surface) = {
         let window = wb.build(&event_loop).unwrap();
         let instance =
@@ -124,40 +123,6 @@ fn main() {
         let adapters = instance.enumerate_adapters();
         // Return `window` so it is not dropped: dropping it invalidates `surface`.
         (window, Some(instance), adapters, surface)
-    };
-    #[cfg(feature = "gl")]
-    let (_window, instance, mut adapters, surface) = {
-        #[cfg(not(target_arch = "wasm32"))]
-        let (window, surface) = {
-            let builder =
-                back::config_context(back::glutin::ContextBuilder::new(), ColorFormat::SELF, None)
-                    .with_vsync(true);
-            let windowed_context = builder.build_windowed(wb, &event_loop).unwrap();
-            let (context, window) = unsafe {
-                windowed_context
-                    .make_current()
-                    .expect("Unable to make context current")
-                    .split()
-            };
-            let surface = back::Surface::from_context(context);
-            (window, surface)
-        };
-        #[cfg(target_arch = "wasm32")]
-        let (window, surface) = {
-            let window = wb.build(&event_loop).unwrap();
-            web_sys::window()
-                .unwrap()
-                .document()
-                .unwrap()
-                .body()
-                .unwrap()
-                .append_child(&winit::platform::web::WindowExtWebSys::canvas(&window));
-            let surface = back::Surface::from_raw_handle(&window);
-            (window, surface)
-        };
-
-        let adapters = surface.enumerate_adapters();
-        (window, None, adapters, surface)
     };
 
     for adapter in &adapters {
@@ -190,11 +155,6 @@ fn main() {
                 } => *control_flow = winit::event_loop::ControlFlow::Exit,
                 winit::event::WindowEvent::Resized(dims) => {
                     println!("resized to {:?}", dims);
-                    #[cfg(all(feature = "gl", not(target_arch = "wasm32")))]
-                    {
-                        let context = renderer.surface.context();
-                        context.resize(dims);
-                    }
                     renderer.dimensions = window::Extent2D {
                         width: dims.width,
                         height: dims.height,

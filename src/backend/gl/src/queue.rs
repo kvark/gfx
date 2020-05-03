@@ -212,6 +212,87 @@ impl CommandQueue {
         &data[ptr.offset as usize .. (ptr.offset + ptr.size) as usize]
     }
 
+    fn present_surface_by_copy(&self, surface: &mut Surface, index: hal::window::SwapImageIndex) {
+        let gl = &self.share.context;
+        #[cfg(surfman)]
+        let surf_device = gl.surfman_device.write();
+        #[cfg(surfman)]
+        let mut raw_surface_option = surface.raw.write();
+        let swapchain = surface.swapchain.as_mut().unwrap();
+        let extent = swapchain.extent;
+
+        #[cfg(surfman)]
+        let mut sc_context = swapchain.context.write();
+
+        // Bind surface to context
+        #[cfg(surfman)]
+        surf_device
+            .bind_surface_to_context(&mut *sc_context, raw_surface_option.take().unwrap())
+            .expect("TODO");
+
+        // Use the framebuffer from the surfman context
+        #[cfg(surfman)]
+        let fbo = surf_device
+            .context_surface_info(&*sc_context)
+            .unwrap()
+            .unwrap()
+            .framebuffer_object;
+
+        #[cfg(surfman)]
+        surf_device
+            .make_context_current(&*sc_context)
+            .expect("TODO");
+
+        unsafe {
+            // Note that here we access the context with `gl.context` instead of accessing the gl context
+            // through the dereference of the `GlContainer` because that will make the `gl.context` current
+            // and we don't want that because we want the swapchain context to stay the current context.
+            gl.context.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(swapchain.fbos[index as usize]));
+            gl.context.bind_framebuffer(
+                glow::DRAW_FRAMEBUFFER,
+                #[cfg(surfman)]
+                match fbo {
+                    0 => None,
+                    other => Some(other),
+                },
+                #[cfg(not(surfman))]
+                None,
+            );
+            gl.context.blit_framebuffer(
+                0,
+                0,
+                extent.width as _,
+                extent.height as _,
+                0,
+                0,
+                extent.width as _,
+                extent.height as _,
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            );
+        }
+
+        #[cfg(surfman)]
+        surf_device
+            .make_no_context_current()
+            .expect("TODO");
+
+        #[cfg(surfman)]
+        let mut raw_surface = surf_device
+            .unbind_surface_from_context(&mut *sc_context)
+            .expect("TODO")
+            .expect("TODO");
+
+        #[cfg(surfman)]
+        surf_device
+            .present_surface(&*sc_context, &mut raw_surface)
+            .expect("TODO");
+        #[cfg(surfman)]
+        {
+            *raw_surface_option = Some(raw_surface);
+        }
+    }
+
     fn present_by_copy(&self, swapchain: &Swapchain, index: hal::window::SwapImageIndex) {
         let gl = &self.share.context;
         let extent = swapchain.extent;
@@ -219,11 +300,7 @@ impl CommandQueue {
         #[cfg(wgl)]
         swapchain.make_current();
 
-        #[cfg(surfman)]
-        gl.surfman_device
-            .write()
-            .make_context_current(&swapchain.context.read())
-            .expect("TODO");
+        //device.make_context_current(&context).expect("TODO");
 
         // Use the framebuffer from the surfman context
         #[cfg(surfman)]
@@ -234,6 +311,12 @@ impl CommandQueue {
             .unwrap()
             .unwrap()
             .framebuffer_object;
+
+        #[cfg(surfman)]
+        gl.surfman_device
+            .write()
+            .make_context_current(&swapchain.context.read())
+            .expect("TODO");
 
         unsafe {
             // Note that here we access the context with `gl.context` instead of accessing the gl context
@@ -1230,11 +1313,12 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
         _image: native::ImageView,
         _wait_semaphore: Option<&native::Semaphore>,
     ) -> Result<Option<hal::window::Suboptimal>, hal::window::PresentError> {
-        let swapchain = surface
+        /*let swapchain = surface
             .swapchain
             .as_ref()
-            .expect("No swapchain is configured!");
-        self.present_by_copy(swapchain, 0);
+            .expect("No swapchain is configured!");*/
+        //self.present_by_copy(swapchain, 0);
+        self.present_surface_by_copy(surface, 0);
 
         #[cfg(wgl)]
         self.share.instance_context.make_current();

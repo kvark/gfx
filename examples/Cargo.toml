@@ -8,7 +8,7 @@ edition = "2018"
 [features]
 default = []
 metal = ["gfx-backend-metal"]
-gl = ["gfx-backend-gl", "gfx-backend-gl/glutin"]
+gl = ["gfx-backend-gl", "gfx-backend-gl/surfman"]
 wgl = ["gfx-backend-gl", "gfx-backend-gl/wgl"]
 dx11 = ["gfx-backend-dx11"]
 dx12 = ["gfx-backend-dx12"]

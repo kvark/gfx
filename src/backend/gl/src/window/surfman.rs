@@ -58,7 +58,7 @@ impl fmt::Debug for Instance {
 impl Instance {
     fn get_default_context_attributes() -> sm::ContextAttributes {
         sm::ContextAttributes {
-            version: sm::GLVersion::new(3, 3), // TODO: Figure out how to determine GL version
+            version: sm::GLVersion::new(3, 2), // TODO: Figure out how to determine GL version
             // TODO: Skipping COMPATIBILITY_PROFILE for now, because it panics with a TODO, but
             // that is probably something we want to provide later.
             flags: sm::ContextAttributeFlags::ALPHA,
@@ -84,7 +84,7 @@ impl Instance {
             .expect("TODO");
 
         // Create context
-        let mut context = device.create_context(&context_descriptor).expect("TODO");
+        let context = device.create_context(&context_descriptor).expect("TODO");
 
         // Create the surface with the context
         let surface = device
@@ -102,17 +102,11 @@ impl Instance {
             )
             .expect("TODO");
 
-        // Bind surface to context
-        device
-            .bind_surface_to_context(&mut context, surface)
-            .expect("TODO");
-
-        device.make_context_current(&context).expect("TODO");
-
         // Create a surface with the given context
         Surface {
             renderbuffer: None,
             swapchain: None,
+            raw: Starc::new(RwLock::new(Some(surface))),
             context: Starc::new(RwLock::new(context)),
             device: Starc::new(RwLock::new(device)),
         }
@@ -192,6 +186,7 @@ impl hal::Instance<B> for Instance {
 pub struct Surface {
     pub(crate) swapchain: Option<Swapchain>,
     pub(crate) context: Starc<RwLock<sm::Context>>,
+    pub(crate) raw: Starc<RwLock<Option<sm::Surface>>>,
     device: Starc<RwLock<sm::Device>>,
     renderbuffer: Option<native::Renderbuffer>,
 }
@@ -210,26 +205,19 @@ impl Surface {
 
 impl Drop for Surface {
     fn drop(&mut self) {
-        // Unbind and get the underlying surface from the context
-        let surface = self
-            .device
-            .read()
-            .unbind_surface_from_context(&mut self.context.write())
-            .expect("TODO");
-
-        if let Some(mut surface) = surface {
+        if !std::thread::panicking() {
             // Destroy the underlying surface
             self.device
                 .read()
-                .destroy_surface(&mut self.context.write(), &mut surface)
+                .destroy_surface(&mut self.context.write(), &mut self.raw.write().take().unwrap())
+                .expect("TODO");
+
+            // Destroy the backing context
+            self.device
+                .read()
+                .destroy_context(&mut self.context.write())
                 .expect("TODO");
         }
-
-        // Destroy the backing context
-        self.device
-            .read()
-            .destroy_context(&mut self.context.write())
-            .expect("TODO");
     }
 }
 
