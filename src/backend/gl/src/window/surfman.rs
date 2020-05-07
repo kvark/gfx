@@ -47,6 +47,7 @@ pub struct Instance {
     low_power_adapter: sm::Adapter,
     #[allow(dead_code)]
     software_adapter: sm::Adapter,
+    root_context: Starc<sm::Context>,
 }
 
 impl fmt::Debug for Instance {
@@ -56,21 +57,16 @@ impl fmt::Debug for Instance {
 }
 
 impl Instance {
-    fn get_default_context_attributes() -> sm::ContextAttributes {
-        sm::ContextAttributes {
-            version: sm::GLVersion::new(3, 2), // TODO: Figure out how to determine GL version
-            // TODO: Skipping COMPATIBILITY_PROFILE for now, because it panics with a TODO, but
-            // that is probably something we want to provide later.
-            flags: sm::ContextAttributeFlags::ALPHA,
-        }
-    }
-
     pub unsafe fn create_surface_from_rwh(
         &self,
         raw_handle: raw_window_handle::RawWindowHandle,
     ) -> Surface {
         // Get context attributes
-        let context_attributes = Self::get_default_context_attributes();
+        let context_attributes = sm::ContextAttributes {
+            version: sm::GLVersion::new(3, 2), // TODO: Figure out how to determine GL version
+            flags: sm::ContextAttributeFlags::COLOR | sm::ContextAttributeFlags::ALPHA,
+            share_with: Some(&*self.root_context),
+        };
 
         // Open a device for the surface
         // TODO: Assume hardware adapter
@@ -115,18 +111,42 @@ impl Instance {
 
 impl hal::Instance<B> for Instance {
     fn create(_: &str, _: u32) -> Result<Self, hal::UnsupportedBackend> {
+        let context_attributes = sm::ContextAttributes {
+            version: sm::GLVersion::new(3, 2), // TODO: Figure out how to determine GL version
+            flags: sm::ContextAttributeFlags::empty(),
+            share_with: None,
+        };
+        let hardware_adapter = SM_CONN.with(|c| c.borrow().create_hardware_adapter().expect("TODO"));
+
+        let mut device = SM_CONN
+            .with(|c| c.borrow().create_device(&hardware_adapter))
+            .expect("TODO");
+
+        // Create context descriptor
+        let context_descriptor = device
+            .create_context_descriptor(&context_attributes)
+            .expect("TODO");
+
+        // Create context
+        let context = device.create_context(&context_descriptor).expect("TODO");
+
         Ok(Instance {
-            hardware_adapter: SM_CONN.with(|c| c.borrow().create_hardware_adapter().expect("TODO")),
+            hardware_adapter,
             low_power_adapter: SM_CONN
                 .with(|c| c.borrow().create_low_power_adapter().expect("TODO")),
             software_adapter: SM_CONN.with(|c| c.borrow().create_software_adapter().expect("TODO")),
+            root_context: Starc::new(context),
         })
     }
 
     fn enumerate_adapters(&self) -> Vec<Adapter<B>> {
         let mut adapters = Vec::with_capacity(3);
 
-        let context_attributes = Self::get_default_context_attributes();
+        let context_attributes = sm::ContextAttributes {
+            version: sm::GLVersion::new(3, 2), // TODO: Figure out how to determine GL version
+            flags: sm::ContextAttributeFlags::empty(),
+            share_with: Some(&*self.root_context),
+        };
 
         for surfman_adapter in &[
             &self.hardware_adapter,
