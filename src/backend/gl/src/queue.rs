@@ -15,7 +15,6 @@ use crate::{
     Share,
     Starc,
     Surface,
-    Swapchain,
 };
 
 // State caching system for command queue.
@@ -214,15 +213,36 @@ impl CommandQueue {
 
     fn present_surface_by_copy(&self, surface: &mut Surface, index: hal::window::SwapImageIndex) {
         let gl = &self.share.context;
+        let swapchain = surface.swapchain.as_mut().unwrap();
+
+        //render something!
+        println!("Rendering into fbo {:?}", swapchain.fbos[index as usize]);
+        unsafe {
+            gl.make_current();
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(swapchain.fbos[index as usize]));
+            gl.draw_buffer(glow::COLOR_ATTACHMENT0);
+            gl.enable(glow::SCISSOR_TEST);
+            gl.scissor(300, 300, 200, 200);
+            gl.color_mask(true, true, true, true);
+            gl.clear_color(1.0, 0.0, 0.0, 1.0);
+            gl.clear(glow::COLOR_BUFFER_BIT);
+            gl.disable(glow::SCISSOR_TEST);
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
+        }
+
         #[cfg(surfman)]
         let surf_device = gl.surfman_device.write();
         #[cfg(surfman)]
         let mut raw_surface_option = surface.raw.write();
-        let swapchain = surface.swapchain.as_mut().unwrap();
         let extent = swapchain.extent;
 
         #[cfg(surfman)]
-        let mut sc_context = swapchain.context.write();
+        let mut sc_context = surface.context.write();
+
+        #[cfg(surfman)]
+        surf_device
+            .make_context_current(&*sc_context)
+            .expect("TODO");
 
         // Bind surface to context
         #[cfg(surfman)]
@@ -239,15 +259,16 @@ impl CommandQueue {
             .framebuffer_object;
 
         #[cfg(surfman)]
-        surf_device
-            .make_context_current(&*sc_context)
-            .expect("TODO");
+        println!("Present fbo {:?} to fbo {:?} of size {:?}", swapchain.fbos[index as usize], fbo, extent);
 
         unsafe {
+            gl.context.disable(glow::SCISSOR_TEST);
+            gl.context.color_mask(true, true, true, true);
             // Note that here we access the context with `gl.context` instead of accessing the gl context
             // through the dereference of the `GlContainer` because that will make the `gl.context` current
             // and we don't want that because we want the swapchain context to stay the current context.
             gl.context.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(swapchain.fbos[index as usize]));
+            //gl.context.read_buffer(glow::COLOR_ATTACHMENT0);
             gl.context.bind_framebuffer(
                 glow::DRAW_FRAMEBUFFER,
                 #[cfg(surfman)]
@@ -258,6 +279,7 @@ impl CommandQueue {
                 #[cfg(not(surfman))]
                 None,
             );
+            gl.context.draw_buffer(glow::COLOR_ATTACHMENT0);
             gl.context.blit_framebuffer(
                 0,
                 0,
@@ -270,12 +292,13 @@ impl CommandQueue {
                 glow::COLOR_BUFFER_BIT,
                 glow::NEAREST,
             );
+            gl.context.enable(glow::SCISSOR_TEST);
+            gl.context.scissor(100, 100, 200, 200);
+            gl.context.clear_color(0.0, 1.0, 0.0, 1.0);
+            gl.context.clear(glow::COLOR_BUFFER_BIT);
+            gl.context.disable(glow::SCISSOR_TEST);
+            gl.context.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
-
-        #[cfg(surfman)]
-        surf_device
-            .make_no_context_current()
-            .expect("TODO");
 
         #[cfg(surfman)]
         let mut raw_surface = surf_device
@@ -287,12 +310,19 @@ impl CommandQueue {
         surf_device
             .present_surface(&*sc_context, &mut raw_surface)
             .expect("TODO");
+
+        #[cfg(surfman)]
+        surf_device
+            .make_no_context_current()
+            .expect("TODO");
+
         #[cfg(surfman)]
         {
             *raw_surface_option = Some(raw_surface);
         }
     }
 
+    /*
     fn present_by_copy(&self, swapchain: &Swapchain, index: hal::window::SwapImageIndex) {
         let gl = &self.share.context;
         let extent = swapchain.extent;
@@ -371,7 +401,7 @@ impl CommandQueue {
 
         #[cfg(wgl)]
         swapchain.swap_buffers();
-    }
+    }*/
 
     // Reset the state to match our _expected_ state before executing
     // a command buffer.
@@ -433,6 +463,7 @@ impl CommandQueue {
     }
 
     fn process(&mut self, cmd: &com::Command, data_buf: &[u8]) {
+        println!("Command {:?}", cmd);
         match *cmd {
             com::Command::BindIndexBuffer(buffer) => {
                 let gl = &self.share.context;
@@ -689,6 +720,7 @@ impl CommandQueue {
             com::Command::DrawBuffers(draw_buffers) => unsafe {
                 if self.share.private_caps.draw_buffers {
                     let draw_buffers = Self::get::<u32>(data_buf, draw_buffers);
+                    println!("\t{:?}", draw_buffers);
                     self.share.context.draw_buffers(draw_buffers);
                 } else {
                     warn!("Draw buffers are not supported");
@@ -1250,6 +1282,7 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
         use crate::pool::BufferMemory;
         {
             for buf in submit_info.command_buffers {
+                println!("----------- command buffer ---------------");
                 let cb = buf.borrow();
                 let memory = cb
                     .memory
@@ -1297,8 +1330,8 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
         S: 'a + Borrow<native::Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
     {
-        for (swapchain, index) in swapchains {
-            self.present_by_copy(swapchain.borrow(), index);
+        for (_swapchain, _index) in swapchains {
+            //self.present_by_copy(swapchain.borrow(), index);
         }
 
         #[cfg(wgl)]

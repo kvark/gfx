@@ -15,7 +15,7 @@ use std::iter;
 #[derive(Debug)]
 pub struct Swapchain {
     // Underlying window, required for presentation
-    pub(crate) context: Starc<RwLock<sm::Context>>,
+    //pub(crate) context: Starc<RwLock<sm::Context>>,
     // Extent because the window lies
     pub(crate) extent: window::Extent2D,
     ///
@@ -251,15 +251,15 @@ impl window::PresentationSurface<B> for Surface {
         );
 
         let fbo = gl.create_framebuffer().unwrap();
-        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(fbo));
+        gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(fbo));
         gl.framebuffer_renderbuffer(
-            glow::READ_FRAMEBUFFER,
+            glow::DRAW_FRAMEBUFFER,
             glow::COLOR_ATTACHMENT0,
             glow::RENDERBUFFER,
             self.renderbuffer,
         );
         self.swapchain = Some(Swapchain {
-            context: self.context.clone(),
+            //context: self.context.clone(),
             extent: config.extent,
             fbos: iter::once(fbo).collect(),
         });

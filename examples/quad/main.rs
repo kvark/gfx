@@ -869,6 +869,7 @@ where
             self.device.destroy_framebuffer(framebuffer);
 
             if result.is_err() {
+                log::error!("Recreating swapchain due to the presentation error");
                 self.recreate_swapchain();
             }
         }
