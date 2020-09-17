@@ -1049,7 +1049,7 @@ impl d::Device<B> for Device {
                 glow::FRAMEBUFFER_UNSUPPORTED => panic!("FRAMEBUFFER_UNSUPPORTED"),
                 glow::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => panic!("FRAMEBUFFER_INCOMPLETE_MULTISAMPLE"),
                 glow::FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS => panic!("FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS"),
-                36057 /*glow::FRAMEBUFFER_INCOMPLETE_DIMENSIONS*/ => panic!("Framebuffer attachements have different dimensions"),
+                36057 /*iglow::FRAMEBUFFER_INCOMPLETE_DIMENSIONS*/ => panic!("Framebuffer attachements have different dimensions"),
                 code => panic!("Unexpected framebuffer status code {}", code),
             }
 

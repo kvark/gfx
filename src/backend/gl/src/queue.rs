@@ -2,11 +2,12 @@ use std::borrow::Borrow;
 use std::{mem, slice};
 
 use glow::HasContext;
+use parking_lot::Mutex;
 use smallvec::SmallVec;
 
 use crate::{
-    command as com, device, info::LegacyFeatures, native, state, Backend, GlContext, Share, Starc,
-    Surface, Swapchain,
+    command as com, device, info::LegacyFeatures, native, state, Backend, Error, GlContext, Share,
+    Starc, Surface, Swapchain,
 };
 
 // State caching system for command queue.
@@ -62,7 +63,11 @@ pub struct CommandQueue {
     features: hal::Features,
     vao: Option<native::VertexArray>,
     state: State,
+    presentation_fence: <glow::Context as glow::HasContext>::Fence,
 }
+
+unsafe impl Send for CommandQueue {}
+unsafe impl Sync for CommandQueue {}
 
 impl CommandQueue {
     /// Create a new command queue.
@@ -76,6 +81,7 @@ impl CommandQueue {
             features,
             vao,
             state: State::new(),
+            presentation_fence: std::ptr::null(),
         }
     }
 
@@ -207,6 +213,22 @@ impl CommandQueue {
         let gl = &self.share.context;
         let extent = swapchain.extent;
 
+        // Wait for rendering to finish
+        unsafe {
+            let wait_result = gl.client_wait_sync(
+                self.presentation_fence,
+                glow::SYNC_FLUSH_COMMANDS_BIT,
+                i32::MAX,
+            );
+
+            if wait_result == glow::WAIT_FAILED {
+                panic!(
+                    "GL error waiting for fence: {:?}",
+                    Error::from_error_code(gl.get_error())
+                );
+            }
+        }
+
         #[cfg(wgl)]
         swapchain.make_current();
 
@@ -218,7 +240,7 @@ impl CommandQueue {
 
         // Use the framebuffer from the surfman context
         #[cfg(surfman)]
-        let fbo = gl
+        let draw_fbo = gl
             .surfman_device
             .read()
             .context_surface_info(&swapchain.context.read())
@@ -227,11 +249,20 @@ impl CommandQueue {
             .framebuffer_object;
 
         unsafe {
-            gl.context.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(swapchain.fbos[index as usize]));
+            let tmp_read_fbo = gl.context.create_framebuffer().expect("TODO");
+            gl.context
+                .bind_framebuffer(glow::READ_FRAMEBUFFER, Some(tmp_read_fbo));
+            gl.context.framebuffer_renderbuffer(
+                glow::READ_FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::RENDERBUFFER,
+                Some(swapchain.renderbuffer),
+            );
+
             gl.context.bind_framebuffer(
                 glow::DRAW_FRAMEBUFFER,
                 #[cfg(surfman)]
-                match fbo {
+                match draw_fbo {
                     0 => None,
                     other => Some(other),
                 },
@@ -250,6 +281,8 @@ impl CommandQueue {
                 glow::COLOR_BUFFER_BIT,
                 glow::LINEAR,
             );
+
+            gl.context.delete_framebuffer(tmp_read_fbo);
         }
 
         // Present the surfman surface
@@ -1194,6 +1227,14 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
                 }
             }
         }
+
+        // Create a fence used to synchronize the finish of the rendering and
+        // the blit used to present on the surface.
+        self.presentation_fence = self
+            .share
+            .context
+            .fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0)
+            .unwrap();
 
         if let Some(fence) = fence {
             if self.share.private_caps.sync {
