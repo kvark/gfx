@@ -6,7 +6,7 @@ use crate::{
 };
 
 use arrayvec::ArrayVec;
-use auxil::{spirv_cross_specialize_ast, FastHashMap};
+use auxil::{spirv_cross_specialize_ast, FastHashMap, ShaderStage};
 use cocoa_foundation::foundation::{NSRange, NSUInteger};
 use copyless::VecHelper;
 use foreign_types::{ForeignType, ForeignTypeRef};
@@ -152,6 +152,7 @@ impl VisibilityShared {
 #[derive(Debug)]
 pub struct Device {
     pub(crate) shared: Arc<Shared>,
+    time_file: Arc<Mutex<std::fs::File>>,
     invalidation_queue: command::QueueInner,
     memory_types: Vec<adapter::MemoryType>,
     features: hal::Features,
@@ -302,6 +303,7 @@ impl adapter::PhysicalDevice<Backend> for PhysicalDevice {
             memory_types: self.memory_types.clone(),
             features: requested_features,
             online_recording: OnlineRecording::default(),
+            time_file: Arc::new(Mutex::new(std::fs::File::create("metal-shader-times.txt").unwrap())),
         };
 
         Ok(adapter::Gpu {
@@ -634,7 +636,7 @@ impl Device {
         compiler_options: &msl::CompilerOptions,
         msl_version: MTLLanguageVersion,
         specialization: &pso::Specialization,
-    ) -> Result<n::ModuleInfo, ShaderError> {
+    ) -> Result<(n::ModuleInfo, std::time::Instant), ShaderError> {
         let module = spirv::Module::from_words(raw_data);
 
         // now parse again using the new overrides
@@ -663,6 +665,8 @@ impl Device {
                 SpirvErrorCode::Unhandled => "Unknown compile error".into(),
             })
         })?;
+
+        let moment = std::time::Instant::now();
 
         let mut entry_point_map = n::EntryPointMap::default();
         for entry_point in entry_points {
@@ -699,16 +703,17 @@ impl Device {
             .new_library_with_source(shader_code.as_ref(), &options)
             .map_err(|err| ShaderError::CompilationFailed(err.into()))?;
 
-        Ok(n::ModuleInfo {
+        Ok((n::ModuleInfo {
             library,
             entry_point_map,
             rasterization_enabled,
-        })
+        }, moment))
     }
 
     fn load_shader(
         &self,
         ep: &pso::EntryPoint<Backend>,
+        stage: ShaderStage,
         layout: &n::PipelineLayout,
         primitive_class: MTLPrimitiveTopologyClass,
         pipeline_cache: Option<&n::PipelineCache>,
@@ -717,6 +722,9 @@ impl Device {
         let msl_version = self.shared.private_caps.msl_version;
         let module_map;
         let (info_owned, info_guard);
+
+        let begin = std::time::Instant::now();
+        let mut middle = begin;
 
         let info = match *ep.module {
             n::ShaderModule::Compiled(ref info) => info,
@@ -731,19 +739,21 @@ impl Device {
                             .modules
                             .get_or_create_with(compiler_options, || FastStorageMap::default());
                         info_guard = module_map.get_or_create_with(data, || {
-                            Self::compile_shader_library(
+                            let (module, moment) = Self::compile_shader_library(
                                 device,
                                 data,
                                 compiler_options,
                                 msl_version,
                                 &ep.specialization,
                             )
-                            .unwrap()
+                            .unwrap();
+                            middle = moment;
+                            module
                         });
                         &*info_guard
                     }
                     None => {
-                        info_owned = Self::compile_shader_library(
+                        let (module, moment) = Self::compile_shader_library(
                             device,
                             data,
                             compiler_options,
@@ -754,11 +764,15 @@ impl Device {
                             error!("Error compiling the shader {:?}", e);
                             pso::CreationError::Other
                         })?;
+                        info_owned = module;
+                        middle = moment;
                         &info_owned
                     }
                 }
             }
         };
+
+        let after_lib = std::time::Instant::now();
 
         let lib = info.library.clone();
         let (name, wg_size) = match info.entry_point_map.get(ep.entry) {
@@ -790,6 +804,20 @@ impl Device {
             error!("Invalid shader entry point '{}': {:?}", name, e);
             pso::CreationError::Other
         })?;
+
+        {
+            use std::io::Write;
+            let last = std::time::Instant::now();
+            let mut time_file = self.time_file.lock();
+            writeln!(time_file, "{:?}, {}, {}, {}, {}",
+                stage,
+                ep.entry,
+                middle.duration_since(begin).as_micros(),
+                after_lib.duration_since(middle).as_micros(),
+                last.duration_since(after_lib).as_micros()
+            ).unwrap();
+        }
+
 
         Ok((lib, mtl_function, wg_size, info.rasterization_enabled))
     }
@@ -1453,7 +1481,7 @@ impl hal::device::Device<Backend> for Device {
 
         // Vertex shader
         let (vs_lib, vs_function, _, enable_rasterization) =
-            self.load_shader(vs, pipeline_layout, primitive_class, cache)?;
+            self.load_shader(vs, ShaderStage::Vertex, pipeline_layout, primitive_class, cache)?;
         pipeline.set_vertex_function(Some(&vs_function));
 
         // Fragment shader
@@ -1461,7 +1489,7 @@ impl hal::device::Device<Backend> for Device {
         let fs_lib = match pipeline_desc.fragment {
             Some(ref ep) => {
                 let (lib, fun, _, _) =
-                    self.load_shader(ep, pipeline_layout, primitive_class, cache)?;
+                    self.load_shader(ep, ShaderStage::Fragment, pipeline_layout, primitive_class, cache)?;
                 fs_function = fun;
                 pipeline.set_fragment_function(Some(&fs_function));
                 Some(lib)
@@ -1681,21 +1709,28 @@ impl hal::device::Device<Backend> for Device {
             // TODO: sample_shading
         }
 
+        let base = std::time::Instant::now();
+        let mut time_file = self.time_file.lock();
+
         device
             .new_render_pipeline_state(&pipeline)
-            .map(|raw| n::GraphicsPipeline {
-                vs_lib,
-                fs_lib,
-                raw,
-                primitive_type,
-                vs_pc_info: pipeline_desc.layout.push_constants.vs,
-                ps_pc_info: pipeline_desc.layout.push_constants.ps,
-                rasterizer_state,
-                depth_bias,
-                depth_stencil_desc: pipeline_desc.depth_stencil.clone(),
-                baked_states: pipeline_desc.baked_states.clone(),
-                vertex_buffers,
-                attachment_formats: subpass.attachments.map(|at| (at.format, at.channel)),
+            .map(|raw| {
+                use std::io::Write;
+                writeln!(time_file, "Graphics pipeline: {} mcs", base.elapsed().as_micros()).unwrap();
+                n::GraphicsPipeline {
+                    vs_lib,
+                    fs_lib,
+                    raw,
+                    primitive_type,
+                    vs_pc_info: pipeline_desc.layout.push_constants.vs,
+                    ps_pc_info: pipeline_desc.layout.push_constants.ps,
+                    rasterizer_state,
+                    depth_bias,
+                    depth_stencil_desc: pipeline_desc.depth_stencil.clone(),
+                    baked_states: pipeline_desc.baked_states.clone(),
+                    vertex_buffers,
+                    attachment_formats: subpass.attachments.map(|at| (at.format, at.channel)),
+                }
             })
             .map_err(|err| {
                 error!("PSO creation failed: {}", err);
@@ -1713,21 +1748,29 @@ impl hal::device::Device<Backend> for Device {
 
         let (cs_lib, cs_function, work_group_size, _) = self.load_shader(
             &pipeline_desc.shader,
+            ShaderStage::Compute,
             &pipeline_desc.layout,
             MTLPrimitiveTopologyClass::Unspecified,
             cache,
         )?;
         pipeline.set_compute_function(Some(&cs_function));
 
+        let base = std::time::Instant::now();
+        let mut time_file = self.time_file.lock();
+
         self.shared
             .device
             .lock()
             .new_compute_pipeline_state(&pipeline)
-            .map(|raw| n::ComputePipeline {
-                cs_lib,
-                raw,
-                work_group_size,
-                pc_info: pipeline_desc.layout.push_constants.cs,
+            .map(|raw| {
+                use std::io::Write;
+                writeln!(time_file, "Compute pipeline: {} mcs", base.elapsed().as_micros()).unwrap();
+                n::ComputePipeline {
+                    cs_lib,
+                    raw,
+                    work_group_size,
+                    pc_info: pipeline_desc.layout.push_constants.cs,
+                }
             })
             .map_err(|err| {
                 error!("PSO creation failed: {}", err);
@@ -1773,7 +1816,7 @@ impl hal::device::Device<Backend> for Device {
             options.vertex.invert_y = !self.features.contains(hal::Features::NDC_Y_UP);
             options.force_zero_initialized_variables = true;
             options.force_native_arrays = true;
-            let info = Self::compile_shader_library(
+            let (info, _) = Self::compile_shader_library(
                 &self.shared.device,
                 raw_data,
                 &options,
