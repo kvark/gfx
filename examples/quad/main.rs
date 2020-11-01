@@ -63,11 +63,11 @@ struct Vertex {
 #[cfg_attr(rustfmt, rustfmt_skip)]
 const QUAD: [Vertex; 6] = [
     Vertex { a_Pos: [ -0.5, 0.33 ], a_Uv: [0.0, 1.0] },
-    Vertex { a_Pos: [  0.5, 0.33 ], a_Uv: [1.0, 1.0] },
-    Vertex { a_Pos: [  0.5,-0.33 ], a_Uv: [1.0, 0.0] },
+    Vertex { a_Pos: [  0.5, 0.73 ], a_Uv: [1.0, 1.0] },
+    Vertex { a_Pos: [  0.5,-0.73 ], a_Uv: [1.0, 0.0] },
 
     Vertex { a_Pos: [ -0.5, 0.33 ], a_Uv: [0.0, 1.0] },
-    Vertex { a_Pos: [  0.5,-0.33 ], a_Uv: [1.0, 0.0] },
+    Vertex { a_Pos: [  0.5,-0.73 ], a_Uv: [1.0, 0.0] },
     Vertex { a_Pos: [ -0.5,-0.33 ], a_Uv: [0.0, 0.0] },
 ];
 
@@ -195,6 +195,7 @@ struct Renderer<B: hal::Backend> {
     viewport: pso::Viewport,
     render_pass: ManuallyDrop<B::RenderPass>,
     pipeline: ManuallyDrop<B::GraphicsPipeline>,
+    pipeline_wire: ManuallyDrop<B::GraphicsPipeline>,
     pipeline_layout: ManuallyDrop<B::PipelineLayout>,
     desc_set: B::DescriptorSet,
     set_layout: ManuallyDrop<B::DescriptorSetLayout>,
@@ -739,6 +740,104 @@ where
             ManuallyDrop::new(pipeline.unwrap())
         };
 
+        let pipeline_wire = {
+            let vs_module = {
+                let spirv =
+                    auxil::read_spirv(Cursor::new(&include_bytes!("data/quad.vert.spv")[..]))
+                        .unwrap();
+                unsafe { device.create_shader_module(&spirv) }.unwrap()
+            };
+            let fs_module = {
+                let spirv =
+                    auxil::read_spirv(Cursor::new(&include_bytes!("./data/quad.frag.spv")[..]))
+                        .unwrap();
+                unsafe { device.create_shader_module(&spirv) }.unwrap()
+            };
+
+            let pipeline = {
+                let (vs_entry, fs_entry) = (
+                    pso::EntryPoint {
+                        entry: ENTRY_NAME,
+                        module: &vs_module,
+                        specialization: hal::spec_const_list![0.8f32],
+                    },
+                    pso::EntryPoint {
+                        entry: ENTRY_NAME,
+                        module: &fs_module,
+                        specialization: pso::Specialization::default(),
+                    },
+                );
+
+                let subpass = Subpass {
+                    index: 0,
+                    main_pass: &*render_pass,
+                };
+
+                let vertex_buffers = vec![pso::VertexBufferDesc {
+                    binding: 0,
+                    stride: mem::size_of::<Vertex>() as u32,
+                    rate: VertexInputRate::Vertex,
+                }];
+
+                let attributes = vec![
+                    pso::AttributeDesc {
+                        location: 0,
+                        binding: 0,
+                        element: pso::Element {
+                            format: f::Format::Rg32Sfloat,
+                            offset: 0,
+                        },
+                    },
+                    pso::AttributeDesc {
+                        location: 1,
+                        binding: 0,
+                        element: pso::Element {
+                            format: f::Format::Rg32Sfloat,
+                            offset: 8,
+                        },
+                    },
+                ];
+
+                let mut pipeline_desc = pso::GraphicsPipelineDesc::new(
+                    pso::PrimitiveAssemblerDesc::Vertex {
+                        buffers: &vertex_buffers,
+                        attributes: &attributes,
+                        input_assembler: pso::InputAssemblerDesc {
+                            primitive: pso::Primitive::TriangleList,
+                            with_adjacency: false,
+                            restart_index: None,
+                        },
+                        vertex: vs_entry,
+                        geometry: None,
+                        tessellation: None,
+                    },
+                    pso::Rasterizer {
+                        polygon_mode: pso::PolygonMode::Line,
+                        .. pso::Rasterizer::FILL
+                    },
+                    Some(fs_entry),
+                    &*pipeline_layout,
+                    subpass,
+                );
+
+                pipeline_desc.blender.targets.push(pso::ColorBlendDesc {
+                    mask: pso::ColorMask::ALL,
+                    blend: Some(pso::BlendState::MULTIPLY),
+                });
+
+                unsafe { device.create_graphics_pipeline(&pipeline_desc, None) }
+            };
+
+            unsafe {
+                device.destroy_shader_module(vs_module);
+            }
+            unsafe {
+                device.destroy_shader_module(fs_module);
+            }
+
+            ManuallyDrop::new(pipeline.unwrap())
+        };
+
         // Rendering setup
         let viewport = pso::Viewport {
             rect: pso::Rect {
@@ -762,6 +861,7 @@ where
             viewport,
             render_pass,
             pipeline,
+            pipeline_wire,
             pipeline_layout,
             desc_set,
             set_layout,
@@ -851,7 +951,6 @@ where
 
             cmd_buffer.set_viewports(0, &[self.viewport.clone()]);
             cmd_buffer.set_scissors(0, &[self.viewport.rect]);
-            cmd_buffer.bind_graphics_pipeline(&self.pipeline);
             cmd_buffer.bind_vertex_buffers(
                 0,
                 iter::once((&*self.vertex_buffer, buffer::SubRange::WHOLE)),
@@ -869,11 +968,14 @@ where
                 self.viewport.rect,
                 &[command::ClearValue {
                     color: command::ClearColor {
-                        float32: [0.8, 0.8, 0.8, 1.0],
+                        float32: [0.1, 0.2, 0.3, 1.0],
                     },
                 }],
                 command::SubpassContents::Inline,
             );
+            cmd_buffer.bind_graphics_pipeline(&self.pipeline);
+            cmd_buffer.draw(0..6, 0..1);
+            cmd_buffer.bind_graphics_pipeline(&self.pipeline_wire);
             cmd_buffer.draw(0..6, 0..1);
             cmd_buffer.end_render_pass();
             cmd_buffer.finish();
