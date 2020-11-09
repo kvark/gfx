@@ -1,6 +1,6 @@
 use crate::{
     command as com, device, info::LegacyFeatures, native, state, Backend, Device, GlContext, Share,
-    Starc, Surface, Swapchain,
+    Starc, Surface,
 };
 
 use glow::HasContext;
@@ -180,101 +180,6 @@ impl CommandQueue {
     fn get_raw(data: &[u8], ptr: com::BufferSlice) -> &[u8] {
         assert!(data.len() >= (ptr.offset + ptr.size) as usize);
         &data[ptr.offset as usize..(ptr.offset + ptr.size) as usize]
-    }
-
-    fn present_by_copy(&self, swapchain: &Swapchain, _index: hal::window::SwapImageIndex) {
-        let gl = &self.share.context;
-        let extent = swapchain.extent;
-
-        // Wait for rendering to finish
-        if let Some(fence) = *self.presentation_fence {
-            unsafe {
-                gl.wait_sync(fence, 0, glow::TIMEOUT_IGNORED);
-            }
-        }
-
-        #[cfg(wgl)]
-        swapchain.make_current();
-
-        #[cfg(surfman)]
-        gl.surfman_device
-            .write()
-            .make_context_current(&swapchain.context.read())
-            .unwrap();
-
-        // Use the framebuffer from the surfman context
-        #[cfg(surfman)]
-        let draw_fbo = gl
-            .surfman_device
-            .read()
-            .context_surface_info(&swapchain.context.read())
-            .unwrap()
-            .unwrap()
-            .framebuffer_object;
-
-        unsafe {
-            #[cfg(surfman)]
-            let tmp_read_fbo = gl.context.create_framebuffer().expect("TODO");
-            #[cfg(surfman)]
-            {
-                gl.context
-                    .bind_framebuffer(glow::READ_FRAMEBUFFER, Some(tmp_read_fbo));
-                gl.context.framebuffer_renderbuffer(
-                    glow::READ_FRAMEBUFFER,
-                    glow::COLOR_ATTACHMENT0,
-                    glow::RENDERBUFFER,
-                    Some(swapchain.renderbuffer),
-                );
-            }
-
-            #[cfg(web)]
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(swapchain.fbos[index as usize]));
-
-            gl.context.bind_framebuffer(
-                glow::DRAW_FRAMEBUFFER,
-                #[cfg(surfman)]
-                match draw_fbo {
-                    0 => None,
-                    other => Some(other),
-                },
-                #[cfg(not(surfman))]
-                None,
-            );
-            gl.context.blit_framebuffer(
-                0,
-                0,
-                extent.width as _,
-                extent.height as _,
-                0,
-                0,
-                extent.width as _,
-                extent.height as _,
-                glow::COLOR_BUFFER_BIT,
-                glow::LINEAR,
-            );
-
-            #[cfg(surfman)]
-            gl.context.delete_framebuffer(tmp_read_fbo);
-        }
-
-        // Present the surfman surface
-        #[cfg(surfman)]
-        {
-            let mut surface = gl
-                .surfman_device
-                .read()
-                .unbind_surface_from_context(&mut swapchain.context.write())
-                .expect("TODO")
-                .expect("TODO");
-            gl.surfman_device
-                .read()
-                .present_surface(&gl.surfman_context.read(), &mut surface)
-                .expect("TODO");
-            gl.surfman_device
-                .read()
-                .bind_surface_to_context(&mut swapchain.context.write(), surface)
-                .expect("TODO")
-        }
     }
 
     // Reset the state to match our _expected_ state before executing
@@ -1012,7 +917,7 @@ impl CommandQueue {
                     }
                 }
 
-                let (gl_draw, gl_offset) = match rasterizer.polygon_mode {
+                let (_gl_draw, gl_offset) = match rasterizer.polygon_mode {
                     Point => (glow::POINT, glow::POLYGON_OFFSET_POINT),
                     Line => (glow::LINE, glow::POLYGON_OFFSET_LINE),
                     Fill => (glow::FILL, glow::POLYGON_OFFSET_FILL),
@@ -1022,7 +927,8 @@ impl CommandQueue {
                     unsafe { gl.line_width(w) };
                 }
 
-                unsafe { gl.polygon_mode(glow::FRONT_AND_BACK, gl_draw) };
+                //TODO: this is not available in GLES
+                //unsafe { gl.polygon_mode(glow::FRONT_AND_BACK, gl_draw) };
 
                 match rasterizer.depth_bias {
                     Some(hal::pso::State::Static(bias)) => unsafe {
@@ -1226,19 +1132,10 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
     unsafe fn present(
         &mut self,
         surface: &mut Surface,
-        _image: native::ImageView,
+        image: native::ImageView,
         _wait_semaphore: Option<&native::Semaphore>,
     ) -> Result<Option<hal::window::Suboptimal>, hal::window::PresentError> {
-        let swapchain = surface
-            .swapchain
-            .as_ref()
-            .expect("No swapchain is configured!");
-        self.present_by_copy(swapchain, 0);
-
-        #[cfg(wgl)]
-        self.share.instance_context.make_current();
-
-        Ok(None)
+        surface.present(image, &self.share.context)
     }
 
     fn wait_idle(&self) -> Result<(), hal::device::OutOfMemory> {

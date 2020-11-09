@@ -57,7 +57,7 @@ version = "0.6"
 features = ["x11"]
 optional = true
 
-[dependencies.gfx-backend-gl]
+[target.'cfg(all(unix, not(any(target_os = "ios", target_os = "macos"))))'.dependencies.gfx-backend-gl]
 path = "../src/backend/gl"
 version = "0.6"
 features = ["x11"]
