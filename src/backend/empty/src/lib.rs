@@ -178,7 +178,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
         _: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>,
-        _: Device,
+        _: &Device,
         _: Option<&()>,
     ) where
         Bf: 'a + BorrowMut<Buffer>,

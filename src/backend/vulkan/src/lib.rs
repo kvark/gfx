@@ -1520,7 +1520,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
             }).collect::<Vec<_>>();
 
             vk::SparseBufferMemoryBindInfo::builder()
-                .buffer(buffer.borrow().raw)
+                .buffer(buffer.borrow_mut().raw)
                 .binds(&sparse_memory_binds)
                 .build()
         }).collect::<Vec<_>>();
@@ -1539,7 +1539,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
             }).collect::<Vec<_>>();
 
             vk::SparseImageOpaqueMemoryBindInfo::builder()
-                .image(image.borrow().raw)
+                .image(image.borrow_mut().raw)
                 .binds(&sparse_memory_binds)
                 .build()
         }).collect::<Vec<_>>();
@@ -1559,7 +1559,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
             }).collect::<Vec<_>>();
 
             vk::SparseImageMemoryBindInfo::builder()
-                .image(image.borrow().raw)
+                .image(image.borrow_mut().raw)
                 .binds(&sparse_memory_binds)
                 .build()
         }).collect::<Vec<_>>();
