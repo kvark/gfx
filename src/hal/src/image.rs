@@ -710,7 +710,7 @@ pub struct SubresourceFootprint {
 // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/html/vkspec.html#sparsememory-standard-shapes
 // https://docs.microsoft.com/en-us/windows/win32/direct3d11/texture2d-and-texture2darray-subresource-tiling
 /// Block size.
-pub fn get_block_size(volume: bool, texel_bits: u8, samples: u8) -> (u16, u16, u16) {
+pub fn get_block_size(volume: bool, texel_bits: u16, samples: u8) -> (u16, u16, u16) {
     let sizes = if volume {
         match texel_bits {
             8 => (64, 32, 32),

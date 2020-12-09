@@ -58,6 +58,7 @@ use std::{
 };
 
 use self::descriptors_cpu::DescriptorCpuPool;
+use crate::resource::Image;
 
 #[derive(Debug)]
 pub(crate) struct HeapProperties {
@@ -534,12 +535,12 @@ impl q::CommandQueue<Backend> for CommandQueue {
 
         for (image, binds) in info.image_memory_binds {
             let image = image.borrow_mut();
-            let image_unbound = image.expect_unbound();
-            let num_layers = image_unbound.kind.num_layers();
 
-            let bits_desc = image_unbound.format.base_format().0.describe_bits();
-            let bits = bits_desc.color + bits_desc.alpha + bits_desc.depth + bits_desc.stencil;
-            let block_size = match image_unbound.kind {
+            let (bits, image_kind) = match image {
+                Image::Unbound(unbound) => (unbound.format.surface_desc().bits, unbound.kind),
+                Image::Bound(bound) => (bound.surface_type.desc().bits, bound.kind),
+            };
+            let block_size = match image_kind {
                 image::Kind::D1(_, _) => unimplemented!(),
                 image::Kind::D2(_, _, _, samples) => image::get_block_size(true, bits, samples),
                 image::Kind::D3(_, _, _) => image::get_block_size(true, bits, 1),
@@ -579,24 +580,12 @@ impl q::CommandQueue<Backend> for CommandQueue {
                 });
 
                 if let Some((memory, memory_offset)) = bind.memory {
-                    let mut resource = native::Resource::null();
-                    // Multiple heaps is not supported.
-                    assert!(heap.is_null());
-                    heap = memory.borrow().heap.as_mut_ptr();
-                    assert_eq!(
-                        winerror::S_OK,
-                        device.raw.CreatePlacedResource(
-                            heap,
-                            memory_offset as u64,
-                            &image_unbound.desc,
-                            d3d12::D3D12_RESOURCE_STATE_COMMON,
-                            std::ptr::null(),
-                            &d3d12::ID3D12Resource::uuidof(),
-                            resource.mut_void(),
-                        )
-                    );
-                    if let Some(ref name) = image_unbound.name {
-                        resource.SetName(name.as_ptr());
+                    // TODO multiple heap support
+                    // would involve multiple update tile mapping calls
+                    if heap.is_null() {
+                        heap = memory.borrow().heap.as_mut_ptr();
+                    } else if cfg!(debug_assertions) {
+                        debug_assert_eq!(heap, memory.borrow().heap.as_mut_ptr());
                     }
                     range_flags.push(d3d12::D3D12_TILE_RANGE_FLAG_REUSE_SINGLE_TILE);
                     heap_range_start_offsets.push(memory_offset as u32);
@@ -608,125 +597,144 @@ impl q::CommandQueue<Backend> for CommandQueue {
                 }
             }
 
-            let mut resource = native::Resource::null();
-            assert_eq!(
-                winerror::S_OK,
-                device.raw.clone().CreateReservedResource(
-                    &image_unbound.desc,
-                    d3d12::D3D12_RESOURCE_STATE_COMMON,
-                    std::ptr::null(),
-                    &d3d12::ID3D12Resource::uuidof(),
-                    resource.mut_void(),
-                )
-            );
+            match image {
+                Image::Bound(bound) => {
+                    self.raw.UpdateTileMappings(
+                        bound.resource.as_mut_ptr(),
+                        resource_coords.len() as u32,
+                        resource_coords.as_ptr(),
+                        region_sizes.as_ptr(),
+                        heap,
+                        range_flags.len() as u32,
+                        range_flags.as_ptr(),
+                        heap_range_start_offsets.as_ptr(),
+                        range_tile_counts.as_ptr(),
+                        d3d12::D3D12_TILE_MAPPING_FLAG_NONE,
+                    );
+                }
+                Image::Unbound(image_unbound) => {
+                    let mut resource = native::Resource::null();
+                    assert_eq!(
+                        winerror::S_OK,
+                        device.raw.clone().CreateReservedResource(
+                            &image_unbound.desc,
+                            d3d12::D3D12_RESOURCE_STATE_COMMON,
+                            std::ptr::null(),
+                            &d3d12::ID3D12Resource::uuidof(),
+                            resource.mut_void(),
+                        )
+                    );
 
-            self.raw.UpdateTileMappings(
-                resource.as_mut_ptr(),
-                resource_coords.len() as u32,
-                resource_coords.as_ptr(),
-                region_sizes.as_ptr(),
-                heap,
-                range_flags.len() as u32,
-                range_flags.as_ptr(),
-                heap_range_start_offsets.as_ptr(),
-                range_tile_counts.as_ptr(),
-                d3d12::D3D12_TILE_MAPPING_FLAG_NONE,
-            );
+                    self.raw.UpdateTileMappings(
+                        resource.as_mut_ptr(),
+                        resource_coords.len() as u32,
+                        resource_coords.as_ptr(),
+                        region_sizes.as_ptr(),
+                        heap,
+                        range_flags.len() as u32,
+                        range_flags.as_ptr(),
+                        heap_range_start_offsets.as_ptr(),
+                        range_tile_counts.as_ptr(),
+                        d3d12::D3D12_TILE_MAPPING_FLAG_NONE,
+                    );
 
-            //TODO: the clear_Xv is incomplete. We should support clearing images created without XXX_ATTACHMENT usage.
-            // for this, we need to check the format and force the `RENDER_TARGET` flag behind the user's back
-            // if the format supports being rendered into, allowing us to create clear_Xv
-            let info = device::ViewInfo {
-                resource,
-                kind: image_unbound.kind,
-                caps: image::ViewCapabilities::empty(),
-                view_kind: match image_unbound.kind {
-                    image::Kind::D1(..) => image::ViewKind::D1Array,
-                    image::Kind::D2(..) => image::ViewKind::D2Array,
-                    image::Kind::D3(..) => image::ViewKind::D3,
-                },
-                format: image_unbound.desc.Format,
-                component_mapping: device::IDENTITY_MAPPING,
-                levels: 0..1,
-                layers: 0..0,
-            };
+                    //TODO: the clear_Xv is incomplete. We should support clearing images created without XXX_ATTACHMENT usage.
+                    // for this, we need to check the format and force the `RENDER_TARGET` flag behind the user's back
+                    // if the format supports being rendered into, allowing us to create clear_Xv
+                    let num_layers = image_unbound.kind.num_layers();
+                    let info = device::ViewInfo {
+                        resource,
+                        kind: image_unbound.kind,
+                        caps: image::ViewCapabilities::empty(),
+                        view_kind: match image_unbound.kind {
+                            image::Kind::D1(..) => image::ViewKind::D1Array,
+                            image::Kind::D2(..) => image::ViewKind::D2Array,
+                            image::Kind::D3(..) => image::ViewKind::D3,
+                        },
+                        format: image_unbound.desc.Format,
+                        component_mapping: device::IDENTITY_MAPPING,
+                        levels: 0..1,
+                        layers: 0..0,
+                    };
 
-            let format_properties = device
-                .format_properties
-                .resolve(image_unbound.format as usize)
-                .properties;
-            let props = match image_unbound.tiling {
-                image::Tiling::Optimal => format_properties.optimal_tiling,
-                image::Tiling::Linear => format_properties.linear_tiling,
-            };
-            let can_clear_color = image_unbound
-                .usage
-                .intersects(image::Usage::TRANSFER_DST | image::Usage::COLOR_ATTACHMENT)
-                && props.contains(f::ImageFeature::COLOR_ATTACHMENT);
-            let can_clear_depth = image_unbound
-                .usage
-                .intersects(image::Usage::TRANSFER_DST | image::Usage::DEPTH_STENCIL_ATTACHMENT)
-                && props.contains(f::ImageFeature::DEPTH_STENCIL_ATTACHMENT);
-            let aspects = image_unbound.format.surface_desc().aspects;
+                    let format_properties = device
+                        .format_properties
+                        .resolve(image_unbound.format as usize)
+                        .properties;
+                    let props = match image_unbound.tiling {
+                        image::Tiling::Optimal => format_properties.optimal_tiling,
+                        image::Tiling::Linear => format_properties.linear_tiling,
+                    };
+                    let can_clear_color = image_unbound
+                        .usage
+                        .intersects(image::Usage::TRANSFER_DST | image::Usage::COLOR_ATTACHMENT)
+                        && props.contains(f::ImageFeature::COLOR_ATTACHMENT);
+                    let can_clear_depth = image_unbound
+                        .usage
+                        .intersects(image::Usage::TRANSFER_DST | image::Usage::DEPTH_STENCIL_ATTACHMENT)
+                        && props.contains(f::ImageFeature::DEPTH_STENCIL_ATTACHMENT);
+                    let aspects = image_unbound.format.surface_desc().aspects;
 
-            *image = resource::Image::Bound(resource::ImageBound {
-                resource,
-                // There is no set heap I can use here
-                place: resource::Place::Swapchain {},
-                surface_type: image_unbound.format.base_format().0,
-                kind: image_unbound.kind,
-                mip_levels: image_unbound.mip_levels,
-                usage: image_unbound.usage,
-                default_view_format: image_unbound.view_format,
-                view_caps: image_unbound.view_caps,
-                descriptor: image_unbound.desc,
-                clear_cv: if aspects.contains(f::Aspects::COLOR) && can_clear_color {
-                    let format = image_unbound.view_format.unwrap();
-                    (0..num_layers)
-                        .map(|layer| {
-                            device.view_image_as_render_target(&device::ViewInfo {
-                                format,
-                                layers: layer..layer + 1,
-                                ..info.clone()
-                            })
-                                .unwrap()
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                },
-                clear_dv: if aspects.contains(f::Aspects::DEPTH) && can_clear_depth {
-                    let format = image_unbound.dsv_format.unwrap();
-                    (0..num_layers)
-                        .map(|layer| {
-                            device.view_image_as_depth_stencil(&device::ViewInfo {
-                                format,
-                                layers: layer..layer + 1,
-                                ..info.clone()
-                            })
-                                .unwrap()
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                },
-                clear_sv: if aspects.contains(f::Aspects::STENCIL) && can_clear_depth {
-                    let format = image_unbound.dsv_format.unwrap();
-                    (0..num_layers)
-                        .map(|layer| {
-                            device.view_image_as_depth_stencil(&device::ViewInfo {
-                                format,
-                                layers: layer..layer + 1,
-                                ..info.clone()
-                            })
-                                .unwrap()
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                },
-                requirements: image_unbound.requirements,
-            });
+                    *image = resource::Image::Bound(resource::ImageBound {
+                        resource,
+                        // There is no set heap I can use here
+                        place: resource::Place::Swapchain {},
+                        surface_type: image_unbound.format.base_format().0,
+                        kind: image_unbound.kind,
+                        mip_levels: image_unbound.mip_levels,
+                        usage: image_unbound.usage,
+                        default_view_format: image_unbound.view_format,
+                        view_caps: image_unbound.view_caps,
+                        descriptor: image_unbound.desc,
+                        clear_cv: if aspects.contains(f::Aspects::COLOR) && can_clear_color {
+                            let format = image_unbound.view_format.unwrap();
+                            (0..num_layers)
+                                .map(|layer| {
+                                    device.view_image_as_render_target(&device::ViewInfo {
+                                        format,
+                                        layers: layer..layer + 1,
+                                        ..info.clone()
+                                    })
+                                        .unwrap()
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        },
+                        clear_dv: if aspects.contains(f::Aspects::DEPTH) && can_clear_depth {
+                            let format = image_unbound.dsv_format.unwrap();
+                            (0..num_layers)
+                                .map(|layer| {
+                                    device.view_image_as_depth_stencil(&device::ViewInfo {
+                                        format,
+                                        layers: layer..layer + 1,
+                                        ..info.clone()
+                                    })
+                                        .unwrap()
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        },
+                        clear_sv: if aspects.contains(f::Aspects::STENCIL) && can_clear_depth {
+                            let format = image_unbound.dsv_format.unwrap();
+                            (0..num_layers)
+                                .map(|layer| {
+                                    device.view_image_as_depth_stencil(&device::ViewInfo {
+                                        format,
+                                        layers: layer..layer + 1,
+                                        ..info.clone()
+                                    })
+                                        .unwrap()
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        },
+                        requirements: image_unbound.requirements,
+                    });
+                }
+            }
         }
         // TODO sparse buffers and opaque images iterated here
         
