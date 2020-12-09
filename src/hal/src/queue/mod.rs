@@ -70,6 +70,59 @@ pub struct Submission<Ic, Iw, Is> {
     pub signal_semaphores: Is,
 }
 
+/// Information for binding sparse memory using a [command queue][CommandQueue].
+///
+/// The info is sent to the device through the [`bind_sparse`][CommandQueue::bind_sparse] method.
+#[derive(Debug)]
+pub struct BindSparseInfo<Iw, Is, Ib, Io, Ii> {
+    /// Semaphores to wait being signalled before submission.
+    pub wait_semaphores: Iw,
+    /// Semaphores to signal after all command buffers in the submission have finished execution.
+    pub signal_semaphores: Is,
+    /// Defines sparse buffer memory bind operations.
+    pub buffer_memory_binds: Ib,
+    /// Defines sparse image opaque memory bind operations.
+    pub image_opaque_memory_binds: Io,
+    /// Defines sparse image memory bind operations.
+    pub image_memory_binds: Ii,
+}
+
+/// Defines a single memory bind region.
+///
+/// This is used in the [`bind_sparse`][CommandQueue::bind_sparse] method to define a physical
+/// store region for a buffer.
+#[derive(Debug)]
+pub struct SparseMemoryBind<M> {
+    /// Offset into the (virtual) resource.
+    pub resource_offset: usize,
+    /// Size of the memory region to be bound.
+    pub size: usize,
+    /// Memory that the physical store is bound to, and the offset into the resource of the binding.
+    ///
+    /// Using `None` will unbind this range. Reading or writing to an unbound range is undefined
+    /// behaviour in some older hardware.
+    pub memory: Option<(M, usize)>,
+}
+
+/// Defines a single image memory bind region.
+///
+/// This is used in the [`bind_sparse`][CommandQueue::bind_sparse] method to define a physical
+/// store region for a buffer.
+#[derive(Debug)]
+pub struct SparseImageMemoryBind<M> {
+    /// Image aspect and region of interest in the image.
+    pub subresource: usize,
+    /// Coordinates of the first texel in the (virtual) image subresource to bind.
+    pub offset: (usize, usize, usize),
+    /// Extent of the (virtual) image subresource region to be bound.
+    pub extent: (usize, usize, usize),
+    /// Memory that the physical store is bound to, and the offset into the resource of the binding.
+    ///
+    /// Using `None` will unbind this range. Reading or writing to an unbound range is undefined
+    /// behaviour in some older hardware.
+    pub memory: Option<(M, usize)>,
+}
+
 /// Abstraction for an internal GPU execution engine.
 ///
 /// Commands are executed on the the device by submitting
@@ -100,6 +153,34 @@ pub trait CommandQueue<B: Backend>: fmt::Debug + Any + Send + Sync {
     ) where
         T: 'a + Borrow<B::CommandBuffer>,
         Ic: IntoIterator<Item = &'a T>,
+        S: 'a + Borrow<B::Semaphore>,
+        Iw: IntoIterator<Item = (&'a S, pso::PipelineStage)>,
+        Is: IntoIterator<Item = &'a S>;
+
+    /// Sparse memory bind operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `info` - information about the memory bindings.
+    ///
+    /// # Safety
+    ///
+    /// - Defining memory as `None` will cause undefined behaviour when the
+    /// tile is read or written from in some hardware.
+    /// - The memory regions provided are not checked to be valid and matching
+    /// of the sparse resource type.
+    unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
+        &mut self,
+        info: BindSparseInfo<Iw, Is, Ib, Io, Ii>
+    ) where
+        Bf: 'a + Borrow<B::Buffer>,
+        M: 'a + Borrow<B::Memory>,
+        Ibi: IntoIterator<Item = SparseMemoryBind<&'a M>>,
+        Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
+        I: 'a + Borrow<B::Image>,
+        Iii: IntoIterator<Item = SparseImageMemoryBind<&'a M>>,
+        Io: IntoIterator<Item = (&'a I, Iii)>,
+        Ii: IntoIterator<Item = (&'a I, Iii)>,
         S: 'a + Borrow<B::Semaphore>,
         Iw: IntoIterator<Item = (&'a S, pso::PipelineStage)>,
         Is: IntoIterator<Item = &'a S>;

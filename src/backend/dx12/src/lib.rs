@@ -507,6 +507,25 @@ impl q::CommandQueue<Backend> for CommandQueue {
         }
     }
 
+    unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
+        &mut self,
+        _info: q::BindSparseInfo<Iw, Is, Ib, Io, Ii>
+    ) where
+        Bf: 'a + Borrow<resource::Buffer>,
+        M: 'a + Borrow<resource::Memory>,
+        Ibi: IntoIterator<Item = q::SparseMemoryBind<&'a M>>,
+        Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
+        I: 'a + Borrow<resource::Image>,
+        Iii: IntoIterator<Item = q::SparseImageMemoryBind<&'a M>>,
+        Io: IntoIterator<Item = (&'a I, Iii)>,
+        Ii: IntoIterator<Item = (&'a I, Iii)>,
+        S: 'a + Borrow<resource::Semaphore>,
+        Iw: IntoIterator<Item = (&'a S, PipelineStage)>,
+        Is: IntoIterator<Item = &'a S>
+    {
+        todo!()
+    }
+
     unsafe fn present(
         &mut self,
         surface: &mut window::Surface,

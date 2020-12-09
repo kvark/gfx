@@ -37,6 +37,25 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
         todo!()
     }
 
+    unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
+        &mut self,
+        _info: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>
+    ) where
+        Bf: 'a + Borrow<<Backend as hal::Backend>::Buffer>,
+        M: 'a + Borrow<<Backend as hal::Backend>::Memory>,
+        Ibi: IntoIterator<Item = queue::SparseMemoryBind<&'a M>>,
+        Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
+        I: 'a + Borrow<<Backend as hal::Backend>::Image>,
+        Iii: IntoIterator<Item = queue::SparseImageMemoryBind<&'a M>>,
+        Io: IntoIterator<Item = (&'a I, Iii)>,
+        Ii: IntoIterator<Item = (&'a I, Iii)>,
+        S: 'a + Borrow<<Backend as hal::Backend>::Semaphore>,
+        Iw: IntoIterator<Item = (&'a S, pso::PipelineStage)>,
+        Is: IntoIterator<Item = &'a S>
+    {
+        todo!()
+    }
+
     unsafe fn submit_without_semaphores<'a, T, Ic>(
         &mut self,
         _command_buffers: Ic,

@@ -1476,6 +1476,25 @@ impl queue::CommandQueue<Backend> for CommandQueue {
         assert_eq!(Ok(()), result);
     }
 
+    unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
+        &mut self,
+        _info: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>
+    ) where
+        Bf: 'a + Borrow<native::Buffer>,
+        M: 'a + Borrow<native::Memory>,
+        Ibi: IntoIterator<Item = queue::SparseMemoryBind<&'a M>>,
+        Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
+        I: 'a + Borrow<native::Image>,
+        Iii: IntoIterator<Item = queue::SparseImageMemoryBind<&'a M>>,
+        Io: IntoIterator<Item = (&'a I, Iii)>,
+        Ii: IntoIterator<Item = (&'a I, Iii)>,
+        S: 'a + Borrow<native::Semaphore>,
+        Iw: IntoIterator<Item = (&'a S, PipelineStage)>,
+        Is: IntoIterator<Item = &'a S>
+    {
+        todo!()
+    }
+
     unsafe fn present(
         &mut self,
         surface: &mut window::Surface,
