@@ -39,15 +39,16 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
 
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
-        _info: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>
+        _info: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>,
+        _fence: Option<&<Backend as hal::Backend>::Fence>,
     ) where
         Bf: 'a + Borrow<<Backend as hal::Backend>::Buffer>,
         M: 'a + Borrow<<Backend as hal::Backend>::Memory>,
         Ibi: IntoIterator<Item = queue::SparseMemoryBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
         I: 'a + Borrow<<Backend as hal::Backend>::Image>,
-        Iii: IntoIterator<Item = queue::SparseImageMemoryBind<&'a M>>,
-        Io: IntoIterator<Item = (&'a I, Iii)>,
+        Iii: IntoIterator<Item = queue::SparseImageMemoryBind<'a, &'a M>>,
+        Io: IntoIterator<Item = (&'a I, Ibi)>,
         Ii: IntoIterator<Item = (&'a I, Iii)>,
         S: 'a + Borrow<<Backend as hal::Backend>::Semaphore>,
         Iw: IntoIterator<Item = (&'a S, pso::PipelineStage)>,

@@ -1156,18 +1156,19 @@ impl queue::CommandQueue<Backend> for CommandQueue {
 
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
-        _info: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>
+        _info: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>,
+        _fence: Option<&Fence>,
     ) where
         Bf: 'a + Borrow<Buffer>,
         M: 'a + Borrow<Memory>,
         Ibi: IntoIterator<Item = queue::SparseMemoryBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
         I: 'a + Borrow<Image>,
-        Iii: IntoIterator<Item = queue::SparseImageMemoryBind<&'a M>>,
-        Io: IntoIterator<Item = (&'a I, Iii)>,
+        Iii: IntoIterator<Item = queue::SparseImageMemoryBind<'a, &'a M>>,
+        Io: IntoIterator<Item = (&'a I, Ibi)>,
         Ii: IntoIterator<Item = (&'a I, Iii)>,
         S: 'a + Borrow<Semaphore>,
-        Iw: IntoIterator<Item = (&'a S, pso::PipelineStage)>,
+        Iw: IntoIterator<Item = &'a S>,
         Is: IntoIterator<Item = &'a S>
     {
         todo!()

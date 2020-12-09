@@ -12,6 +12,7 @@ use crate::{
     device::OutOfMemory,
     pso,
     window::{PresentError, PresentationSurface, Suboptimal},
+    image,
     Backend,
 };
 use std::{any::Any, borrow::Borrow, fmt, iter};
@@ -109,13 +110,13 @@ pub struct SparseMemoryBind<M> {
 /// This is used in the [`bind_sparse`][CommandQueue::bind_sparse] method to define a physical
 /// store region for a buffer.
 #[derive(Debug)]
-pub struct SparseImageMemoryBind<M> {
+pub struct SparseImageMemoryBind<'a, M> {
     /// Image aspect and region of interest in the image.
-    pub subresource: usize,
+    pub subresource: &'a image::Subresource,
     /// Coordinates of the first texel in the (virtual) image subresource to bind.
-    pub offset: (usize, usize, usize),
+    pub offset: image::Offset,
     /// Extent of the (virtual) image subresource region to be bound.
-    pub extent: (usize, usize, usize),
+    pub extent: image::Extent,
     /// Memory that the physical store is bound to, and the offset into the resource of the binding.
     ///
     /// Using `None` will unbind this range. Reading or writing to an unbound range is undefined
@@ -171,18 +172,19 @@ pub trait CommandQueue<B: Backend>: fmt::Debug + Any + Send + Sync {
     /// of the sparse resource type.
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
-        info: BindSparseInfo<Iw, Is, Ib, Io, Ii>
+        info: BindSparseInfo<Iw, Is, Ib, Io, Ii>,
+        fence: Option<&B::Fence>,
     ) where
         Bf: 'a + Borrow<B::Buffer>,
         M: 'a + Borrow<B::Memory>,
         Ibi: IntoIterator<Item = SparseMemoryBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
         I: 'a + Borrow<B::Image>,
-        Iii: IntoIterator<Item = SparseImageMemoryBind<&'a M>>,
-        Io: IntoIterator<Item = (&'a I, Iii)>,
+        Iii: IntoIterator<Item = SparseImageMemoryBind<'a, &'a M>>,
+        Io: IntoIterator<Item = (&'a I, Ibi)>,
         Ii: IntoIterator<Item = (&'a I, Iii)>,
         S: 'a + Borrow<B::Semaphore>,
-        Iw: IntoIterator<Item = (&'a S, pso::PipelineStage)>,
+        Iw: IntoIterator<Item = &'a S>,
         Is: IntoIterator<Item = &'a S>;
 
     /// Simplified version of `submit` that doesn't expect any semaphores.
