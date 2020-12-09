@@ -48,7 +48,7 @@ use arrayvec::ArrayVec;
 use parking_lot::{Condvar, Mutex, RwLock};
 
 use std::{
-    borrow::Borrow,
+    borrow::{Borrow, BorrowMut},
     cell::RefCell,
     fmt, mem,
     ops::Range,
@@ -1157,16 +1157,17 @@ impl queue::CommandQueue<Backend> for CommandQueue {
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
         _info: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>,
+        _device: &device::Device,
         _fence: Option<&Fence>,
     ) where
-        Bf: 'a + Borrow<Buffer>,
+        Bf: 'a + BorrowMut<Buffer>,
         M: 'a + Borrow<Memory>,
         Ibi: IntoIterator<Item = queue::SparseMemoryBind<&'a M>>,
-        Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
-        I: 'a + Borrow<Image>,
+        Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
+        I: 'a + BorrowMut<Image>,
         Iii: IntoIterator<Item = queue::SparseImageMemoryBind<'a, &'a M>>,
-        Io: IntoIterator<Item = (&'a I, Ibi)>,
-        Ii: IntoIterator<Item = (&'a I, Iii)>,
+        Io: IntoIterator<Item = (&'a mut I, Ibi)>,
+        Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
         Is: IntoIterator<Item = &'a S>

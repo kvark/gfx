@@ -34,7 +34,7 @@ use hal::{
 };
 
 use std::{
-    borrow::{Borrow, Cow},
+    borrow::{Borrow, BorrowMut, Cow},
     ffi::{CStr, CString},
     fmt, mem, slice,
     sync::Arc,
@@ -1479,16 +1479,17 @@ impl queue::CommandQueue<Backend> for CommandQueue {
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
         info: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>,
+        _device: &Device,
         fence: Option<&native::Fence>,
     ) where
-        Bf: 'a + Borrow<native::Buffer>,
+        Bf: 'a + BorrowMut<native::Buffer>,
         M: 'a + Borrow<native::Memory>,
         Ibi: IntoIterator<Item = queue::SparseMemoryBind<&'a M>>,
-        Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
-        I: 'a + Borrow<native::Image>,
+        Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
+        I: 'a + BorrowMut<native::Image>,
         Iii: IntoIterator<Item = queue::SparseImageMemoryBind<'a, &'a M>>,
-        Io: IntoIterator<Item = (&'a I, Ibi)>,
-        Ii: IntoIterator<Item = (&'a I, Iii)>,
+        Io: IntoIterator<Item = (&'a mut I, Ibi)>,
+        Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<native::Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
         Is: IntoIterator<Item = &'a S>

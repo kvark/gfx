@@ -717,7 +717,7 @@ impl Device {
         Ok(())
     }
 
-    fn view_image_as_render_target(
+    pub(crate) fn view_image_as_render_target(
         &self,
         info: &ViewInfo,
     ) -> Result<descriptors_cpu::Handle, image::ViewCreationError> {
@@ -805,7 +805,7 @@ impl Device {
         Ok(())
     }
 
-    fn view_image_as_depth_stencil(
+    pub(crate) fn view_image_as_depth_stencil(
         &self,
         info: &ViewInfo,
     ) -> Result<descriptors_cpu::Handle, image::ViewCreationError> {

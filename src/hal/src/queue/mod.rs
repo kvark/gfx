@@ -15,7 +15,7 @@ use crate::{
     image,
     Backend,
 };
-use std::{any::Any, borrow::Borrow, fmt, iter};
+use std::{any::Any, borrow::{Borrow, BorrowMut}, fmt, iter};
 
 pub use self::family::{QueueFamily, QueueFamilyId, QueueGroup};
 
@@ -95,9 +95,9 @@ pub struct BindSparseInfo<Iw, Is, Ib, Io, Ii> {
 #[derive(Debug)]
 pub struct SparseMemoryBind<M> {
     /// Offset into the (virtual) resource.
-    pub resource_offset: usize,
+    pub resource_offset: u64,
     /// Size of the memory region to be bound.
-    pub size: usize,
+    pub size: u64,
     /// Memory that the physical store is bound to, and the offset into the resource of the binding.
     ///
     /// Using `None` will unbind this range. Reading or writing to an unbound range is undefined
@@ -121,7 +121,7 @@ pub struct SparseImageMemoryBind<'a, M> {
     ///
     /// Using `None` will unbind this range. Reading or writing to an unbound range is undefined
     /// behaviour in some older hardware.
-    pub memory: Option<(M, usize)>,
+    pub memory: Option<(M, u64)>,
 }
 
 /// Abstraction for an internal GPU execution engine.
@@ -173,16 +173,17 @@ pub trait CommandQueue<B: Backend>: fmt::Debug + Any + Send + Sync {
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
         info: BindSparseInfo<Iw, Is, Ib, Io, Ii>,
+        device: &B::Device,
         fence: Option<&B::Fence>,
     ) where
-        Bf: 'a + Borrow<B::Buffer>,
+        Bf: 'a + BorrowMut<B::Buffer>,
         M: 'a + Borrow<B::Memory>,
         Ibi: IntoIterator<Item = SparseMemoryBind<&'a M>>,
-        Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
-        I: 'a + Borrow<B::Image>,
+        Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
+        I: 'a + BorrowMut<B::Image>,
         Iii: IntoIterator<Item = SparseImageMemoryBind<'a, &'a M>>,
-        Io: IntoIterator<Item = (&'a I, Ibi)>,
-        Ii: IntoIterator<Item = (&'a I, Iii)>,
+        Io: IntoIterator<Item = (&'a mut I, Ibi)>,
+        Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<B::Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
         Is: IntoIterator<Item = &'a S>;

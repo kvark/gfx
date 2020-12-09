@@ -33,7 +33,7 @@ use parking_lot::Mutex;
 #[cfg(feature = "dispatch")]
 use std::fmt;
 use std::{
-    borrow::Borrow,
+    borrow::{Borrow, BorrowMut},
     cell::RefCell,
     iter, mem,
     ops::{Deref, Range},
@@ -2410,16 +2410,17 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
         _info: hal::queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>,
+        _device: &crate::Device,
         _fence: Option<&native::Fence>,
     ) where
-        Bf: 'a + Borrow<native::Buffer>,
+        Bf: 'a + BorrowMut<native::Buffer>,
         M: 'a + Borrow<native::Memory>,
         Ibi: IntoIterator<Item = hal::queue::SparseMemoryBind<&'a M>>,
-        Ib: IntoIterator<Item = (&'a Bf, Ibi)>,
-        I: 'a + Borrow<native::Image>,
+        Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
+        I: 'a + BorrowMut<native::Image>,
         Iii: IntoIterator<Item = hal::queue::SparseImageMemoryBind<'a, &'a M>>,
-        Io: IntoIterator<Item = (&'a I, Ibi)>,
-        Ii: IntoIterator<Item = (&'a I, Iii)>,
+        Io: IntoIterator<Item = (&'a mut I, Ibi)>,
+        Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<native::Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
         Is: IntoIterator<Item = &'a S>
