@@ -1119,15 +1119,15 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
         _device: &device::Device,
         _fence: Option<&native::Fence>,
     ) where
-        Bf: 'a + BorrowMut<B::Buffer>,
-        M: 'a + Borrow<B::Memory>,
+        Bf: 'a + BorrowMut<native::Buffer>,
+        M: 'a + Borrow<native::Memory>,
         Ibi: IntoIterator<Item = hal::queue::SparseMemoryBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
-        I: 'a + BorrowMut<B::Image>,
+        I: 'a + BorrowMut<native::Image>,
         Iii: IntoIterator<Item = hal::queue::SparseImageMemoryBind<'a, &'a M>>,
         Io: IntoIterator<Item = (&'a mut I, Ibi)>,
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
-        S: 'a + Borrow<B::Semaphore>,
+        S: 'a + Borrow<native::Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
         Is: IntoIterator<Item = &'a S>
     {
