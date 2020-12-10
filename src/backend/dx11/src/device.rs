@@ -1508,7 +1508,11 @@ impl device::Device<Backend> for Device {
                     Usage: usage,
                     BindFlags: bind,
                     CPUAccessFlags: cpu,
-                    MiscFlags: 0,
+                    MiscFlags: if image.view_caps.contains(image::ViewCapabilities::SPARSE_BINDING) {
+                        d3d11::D3D11_RESOURCE_MISC_TILED
+                    } else {
+                    0
+                    },
                 };
 
                 let hr = self.raw.CreateTexture1D(
@@ -1543,6 +1547,10 @@ impl device::Device<Backend> for Device {
                         d3d11::D3D11_RESOURCE_MISC_TEXTURECUBE
                     } else {
                         0
+                    } | if image.view_caps.contains(image::ViewCapabilities::SPARSE_BINDING) {
+                        d3d11::D3D11_RESOURCE_MISC_TILED
+                    } else {
+                        0
                     },
                 };
 
@@ -1570,7 +1578,11 @@ impl device::Device<Backend> for Device {
                     Usage: usage,
                     BindFlags: bind,
                     CPUAccessFlags: cpu,
-                    MiscFlags: 0,
+                    MiscFlags: if image.view_caps.contains(image::ViewCapabilities::SPARSE_BINDING) {
+                        d3d11::D3D11_RESOURCE_MISC_TILED
+                    } else {
+                        0
+                    },
                 };
 
                 let hr = self.raw.CreateTexture3D(

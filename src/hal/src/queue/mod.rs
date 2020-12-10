@@ -170,6 +170,8 @@ pub trait CommandQueue<B: Backend>: fmt::Debug + Any + Send + Sync {
     /// tile is read or written from in some hardware.
     /// - The memory regions provided are not checked to be valid and matching
     /// of the sparse resource type.
+    /// - If extents are not a multiple of the block size, additional space will be
+    /// bound, and accessing memory is unsafe.
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
         info: BindSparseInfo<Iw, Is, Ib, Io, Ii>,

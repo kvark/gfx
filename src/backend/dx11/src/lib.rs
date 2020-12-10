@@ -38,7 +38,7 @@ use winapi::{
         windef::{HWND, RECT},
         winerror,
     },
-    um::{d3d11, d3d11_1, d3dcommon, winuser::GetClientRect},
+    um::{d3d11, d3d11_1, d3d11_2, d3dcommon, winuser::GetClientRect},
     Interface as _,
 };
 
@@ -1172,7 +1172,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
         Iw: IntoIterator<Item = &'a S>,
         Is: IntoIterator<Item = &'a S>
     {
-        todo!()
+        unimplemented!()
     }
 
     unsafe fn present(
