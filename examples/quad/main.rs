@@ -393,7 +393,11 @@ where
                     ColorFormat::SELF,
                     i::Tiling::Optimal,
                     i::Usage::TRANSFER_DST | i::Usage::SAMPLED,
-                    i::ViewCapabilities::empty(),
+                    if cfg!(feature = "sparselybound") {
+                        i::ViewCapabilities::SPARSE_BINDING | i::ViewCapabilities::SPARSE_RESIDENCY
+                    } else {
+                        i::ViewCapabilities::empty()
+                    },
                 )
             }
             .unwrap(),
@@ -413,7 +417,37 @@ where
             unsafe { device.allocate_memory(device_type, image_req.size) }.unwrap(),
         );
 
-        unsafe { device.bind_image_memory(&image_memory, 0, &mut image_logo) }.unwrap();
+        if cfg!(feature = "sparselybound") {
+            unsafe {
+                queue_group.queues[0]
+                    .bind_sparse(hal::queue::BindSparseInfo {
+                        wait_semaphores: std::iter::empty::<&B::Semaphore>(),
+                        signal_semaphores: std::iter::empty::<&B::Semaphore>(),
+                        buffer_memory_binds: std::iter::empty::<(&mut B::Buffer, std::iter::Empty<hal::queue::SparseMemoryBind<&B::Memory>>)>(),
+                        image_opaque_memory_binds: std::iter::empty(),
+                        image_memory_binds: std::iter::once((&mut *image_logo, std::iter::once(hal::queue::SparseImageMemoryBind {
+                            subresource: &hal::image::Subresource {
+                                aspects: hal::format::Aspects::COLOR,
+                                level: 0,
+                                layer: 0
+                            },
+                            offset: hal::image::Offset {
+                                x: 0,
+                                y: 0,
+                                z: 0,
+                            },
+                            extent: hal::image::Extent {
+                                width,
+                                height,
+                                depth: 1,
+                            },
+                            memory: Some((&*image_memory, 0)),
+                        })))
+                    }, &device, None);
+            }
+        } else {
+            unsafe { device.bind_image_memory(&image_memory, 0, &mut image_logo) }.unwrap();
+        }
         let image_srv = ManuallyDrop::new(
             unsafe {
                 device.create_image_view(

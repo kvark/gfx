@@ -542,7 +542,7 @@ impl q::CommandQueue<Backend> for CommandQueue {
             };
             let block_size = match image_kind {
                 image::Kind::D1(_, _) => unimplemented!(),
-                image::Kind::D2(_, _, _, samples) => image::get_block_size(true, bits, samples),
+                image::Kind::D2(_, _, _, samples) => image::get_block_size(false, bits, samples),
                 image::Kind::D3(_, _, _) => image::get_block_size(true, bits, 1),
             };
             
@@ -565,10 +565,14 @@ impl q::CommandQueue<Backend> for CommandQueue {
                         0
                     ),
                 });
+
+                // Increment one tile if the extent is not a multiple of the block size
+                // Accessing these IS unsafe, but that is also true of Vulkan as the documentation
+                // requires an extent multiple of the block size.
                 let tile_extents = (
-                    bind.extent.width / block_size.0 as u32,
-                    bind.extent.height / block_size.1 as u32,
-                    bind.extent.depth / block_size.2 as u32,
+                    (bind.extent.width / block_size.0 as u32) + ((bind.extent.width % block_size.0 as u32) != 0) as u32,
+                    (bind.extent.height / block_size.1 as u32) + ((bind.extent.height % block_size.1 as u32) != 0) as u32,
+                    (bind.extent.depth / block_size.2 as u32) + ((bind.extent.depth % block_size.2 as u32) != 0) as u32,
                 );
                 let number_tiles = tile_extents.0 * tile_extents.1 * tile_extents.2;
                 region_sizes.push(d3d12::D3D12_TILE_REGION_SIZE {
@@ -587,7 +591,7 @@ impl q::CommandQueue<Backend> for CommandQueue {
                     } else if cfg!(debug_assertions) {
                         debug_assert_eq!(heap, memory.borrow().heap.as_mut_ptr());
                     }
-                    range_flags.push(d3d12::D3D12_TILE_RANGE_FLAG_REUSE_SINGLE_TILE);
+                    range_flags.push(d3d12::D3D12_TILE_RANGE_FLAG_NONE);
                     heap_range_start_offsets.push(memory_offset as u32);
                     range_tile_counts.push(number_tiles);
                 } else {

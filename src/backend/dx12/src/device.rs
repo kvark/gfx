@@ -2482,15 +2482,22 @@ impl d::Device<B> for Device {
         let extent = kind.extent();
 
         let format_info = self.format_properties.resolve(format as usize);
-        let (layout, features) = match tiling {
-            image::Tiling::Optimal => (
-                d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
+        let (layout, features) = if view_caps.contains(image::ViewCapabilities::SPARSE_BINDING) {
+            (
+                d3d12::D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE,
                 format_info.properties.optimal_tiling,
-            ),
-            image::Tiling::Linear => (
-                d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-                format_info.properties.linear_tiling,
-            ),
+            )
+        } else {
+            match tiling {
+                image::Tiling::Optimal => (
+                    d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
+                    format_info.properties.optimal_tiling,
+                ),
+                image::Tiling::Linear => (
+                    d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+                    format_info.properties.linear_tiling,
+                ),
+            }
         };
         if format_info.sample_count_mask & kind.num_samples() == 0 {
             return Err(image::CreationError::Samples(kind.num_samples()));

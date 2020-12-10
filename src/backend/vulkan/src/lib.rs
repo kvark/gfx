@@ -1479,7 +1479,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
     unsafe fn bind_sparse<'a, M, Bf, I, S, Iw, Is, Ibi, Ib, Iii, Io, Ii>(
         &mut self,
         info: queue::BindSparseInfo<Iw, Is, Ib, Io, Ii>,
-        _device: &Device,
+        device: &Device,
         fence: Option<&native::Fence>,
     ) where
         Bf: 'a + BorrowMut<native::Buffer>,
@@ -1506,8 +1506,10 @@ impl queue::CommandQueue<Backend> for CommandQueue {
             .map(|semaphore| semaphore.borrow().0)
             .collect::<Vec<_>>();
 
+        let mut buffer_memory_binds = Vec::new();
         let buffer_binds = info.buffer_memory_binds.into_iter().map(|(buffer, bind_iter)| {
-            let sparse_memory_binds = bind_iter.into_iter().map(|bind| {
+            let binds_before = buffer_memory_binds.len();
+            buffer_memory_binds.extend(bind_iter.into_iter().map(|bind| {
                 let mut bind_builder = vk::SparseMemoryBind::builder()
                     .resource_offset(bind.resource_offset as u64)
                     .size(bind.size as u64);
@@ -1517,16 +1519,18 @@ impl queue::CommandQueue<Backend> for CommandQueue {
                 }
 
                 bind_builder.build()
-            }).collect::<Vec<_>>();
+            }));
 
             vk::SparseBufferMemoryBindInfo::builder()
                 .buffer(buffer.borrow_mut().raw)
-                .binds(&sparse_memory_binds)
+                .binds(&buffer_memory_binds[binds_before..buffer_memory_binds.len()])
                 .build()
         }).collect::<Vec<_>>();
 
+        let mut image_opaque_memory_binds = Vec::new();
         let image_opaque_binds = info.image_opaque_memory_binds.into_iter().map(|(image, bind_iter)| {
-            let sparse_memory_binds = bind_iter.into_iter().map(|bind| {
+            let binds_before = image_opaque_memory_binds.len();
+            image_opaque_memory_binds.extend(bind_iter.into_iter().map(|bind| {
                 let mut bind_builder = vk::SparseMemoryBind::builder()
                     .resource_offset(bind.resource_offset as u64)
                     .size(bind.size as u64);
@@ -1536,16 +1540,18 @@ impl queue::CommandQueue<Backend> for CommandQueue {
                 }
 
                 bind_builder.build()
-            }).collect::<Vec<_>>();
+            }));
 
             vk::SparseImageOpaqueMemoryBindInfo::builder()
                 .image(image.borrow_mut().raw)
-                .binds(&sparse_memory_binds)
+                .binds(&image_opaque_memory_binds[binds_before..image_opaque_memory_binds.len()])
                 .build()
         }).collect::<Vec<_>>();
 
+        let mut image_memory_binds = Vec::new();
         let image_binds = info.image_memory_binds.into_iter().map(|(image, bind_iter)| {
-            let sparse_memory_binds = bind_iter.into_iter().map(|bind| {
+            let binds_before = image_memory_binds.len();
+            image_memory_binds.extend(bind_iter.into_iter().map(|bind| {
                 let mut bind_builder = vk::SparseImageMemoryBind::builder()
                     .subresource(conv::map_subresource(bind.subresource))
                     .offset(conv::map_offset(bind.offset))
@@ -1556,27 +1562,27 @@ impl queue::CommandQueue<Backend> for CommandQueue {
                 }
 
                 bind_builder.build()
-            }).collect::<Vec<_>>();
+            }));
 
             vk::SparseImageMemoryBindInfo::builder()
                 .image(image.borrow_mut().raw)
-                .binds(&sparse_memory_binds)
+                .binds(&image_memory_binds[binds_before..image_memory_binds.len()])
                 .build()
         }).collect::<Vec<_>>();
 
         let info = vk::BindSparseInfo::builder()
-            .wait_semaphores(&waits)
-            .signal_semaphores(&signals)
-            .buffer_binds(&buffer_binds)
-            .image_opaque_binds(&image_opaque_binds)
-            .image_binds(&image_binds);
+            .wait_semaphores(&waits[..])
+            .signal_semaphores(&signals[..])
+            .buffer_binds(&buffer_binds[..])
+            .image_opaque_binds(&image_opaque_binds[..])
+            .image_binds(&image_binds[..]);
 
         let info = info.build();
         let fence_raw = fence.map(|fence| fence.0).unwrap_or(vk::Fence::null());
 
         assert_eq!(
             vk::Result::SUCCESS,
-            self.device.raw.fp_v1_0().queue_bind_sparse(*self.raw, 1, &info as *const _, fence_raw)
+            device.shared.raw.fp_v1_0().queue_bind_sparse(*self.raw, 1, &info as *const _, fence_raw)
         );
     }
 

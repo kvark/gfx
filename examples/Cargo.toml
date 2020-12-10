@@ -12,6 +12,7 @@ gl = ["gfx-backend-gl"]
 dx11 = ["gfx-backend-dx11"]
 dx12 = ["gfx-backend-dx12"]
 vulkan = ["gfx-backend-vulkan"]
+sparselybound = []
 unstable = []
 
 [[bin]]
