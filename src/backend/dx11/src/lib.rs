@@ -1170,7 +1170,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
-        Is: IntoIterator<Item = &'a S>
+        Is: IntoIterator<Item = &'a S>,
     {
         unimplemented!()
     }

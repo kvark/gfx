@@ -419,31 +419,36 @@ where
 
         if cfg!(feature = "sparselybound") {
             unsafe {
-                queue_group.queues[0]
-                    .bind_sparse(hal::queue::BindSparseInfo {
+                queue_group.queues[0].bind_sparse(
+                    hal::queue::BindSparseInfo {
                         wait_semaphores: std::iter::empty::<&B::Semaphore>(),
                         signal_semaphores: std::iter::empty::<&B::Semaphore>(),
-                        buffer_memory_binds: std::iter::empty::<(&mut B::Buffer, std::iter::Empty<hal::queue::SparseMemoryBind<&B::Memory>>)>(),
+                        buffer_memory_binds: std::iter::empty::<(
+                            &mut B::Buffer,
+                            std::iter::Empty<hal::queue::SparseMemoryBind<&B::Memory>>,
+                        )>(),
                         image_opaque_memory_binds: std::iter::empty(),
-                        image_memory_binds: std::iter::once((&mut *image_logo, std::iter::once(hal::queue::SparseImageMemoryBind {
-                            subresource: &hal::image::Subresource {
-                                aspects: hal::format::Aspects::COLOR,
-                                level: 0,
-                                layer: 0
-                            },
-                            offset: hal::image::Offset {
-                                x: 0,
-                                y: 0,
-                                z: 0,
-                            },
-                            extent: hal::image::Extent {
-                                width,
-                                height,
-                                depth: 1,
-                            },
-                            memory: Some((&*image_memory, 0)),
-                        })))
-                    }, &device, None);
+                        image_memory_binds: std::iter::once((
+                            &mut *image_logo,
+                            std::iter::once(hal::queue::SparseImageMemoryBind {
+                                subresource: &hal::image::Subresource {
+                                    aspects: hal::format::Aspects::COLOR,
+                                    level: 0,
+                                    layer: 0,
+                                },
+                                offset: hal::image::Offset { x: 0, y: 0, z: 0 },
+                                extent: hal::image::Extent {
+                                    width,
+                                    height,
+                                    depth: 1,
+                                },
+                                memory: Some((&*image_memory, 0)),
+                            }),
+                        )),
+                    },
+                    &device,
+                    None,
+                );
             }
         } else {
             unsafe { device.bind_image_memory(&image_memory, 0, &mut image_logo) }.unwrap();

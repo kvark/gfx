@@ -524,7 +524,7 @@ impl q::CommandQueue<Backend> for CommandQueue {
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<resource::Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
-        Is: IntoIterator<Item = &'a S>
+        Is: IntoIterator<Item = &'a S>,
     {
         // Reset idle fence and event
         // That's safe here due to exclusive access to the queue
@@ -545,7 +545,7 @@ impl q::CommandQueue<Backend> for CommandQueue {
                 image::Kind::D2(_, _, _, samples) => image::get_block_size(false, bits, samples),
                 image::Kind::D3(_, _, _) => image::get_block_size(true, bits, 1),
             };
-            
+
             // TODO avoid allocations
             let mut resource_coords = Vec::new();
             let mut region_sizes = Vec::new();
@@ -562,7 +562,7 @@ impl q::CommandQueue<Backend> for CommandQueue {
                     Subresource: image.calc_subresource(
                         bind.subresource.level as _,
                         bind.subresource.layer as _,
-                        0
+                        0,
                     ),
                 });
 
@@ -570,9 +570,12 @@ impl q::CommandQueue<Backend> for CommandQueue {
                 // Accessing these IS unsafe, but that is also true of Vulkan as the documentation
                 // requires an extent multiple of the block size.
                 let tile_extents = (
-                    (bind.extent.width / block_size.0 as u32) + ((bind.extent.width % block_size.0 as u32) != 0) as u32,
-                    (bind.extent.height / block_size.1 as u32) + ((bind.extent.height % block_size.1 as u32) != 0) as u32,
-                    (bind.extent.depth / block_size.2 as u32) + ((bind.extent.depth % block_size.2 as u32) != 0) as u32,
+                    (bind.extent.width / block_size.0 as u32)
+                        + ((bind.extent.width % block_size.0 as u32) != 0) as u32,
+                    (bind.extent.height / block_size.1 as u32)
+                        + ((bind.extent.height % block_size.1 as u32) != 0) as u32,
+                    (bind.extent.depth / block_size.2 as u32)
+                        + ((bind.extent.depth % block_size.2 as u32) != 0) as u32,
                 );
                 let number_tiles = tile_extents.0 * tile_extents.1 * tile_extents.2;
                 region_sizes.push(d3d12::D3D12_TILE_REGION_SIZE {
@@ -673,10 +676,10 @@ impl q::CommandQueue<Backend> for CommandQueue {
                         .usage
                         .intersects(image::Usage::TRANSFER_DST | image::Usage::COLOR_ATTACHMENT)
                         && props.contains(f::ImageFeature::COLOR_ATTACHMENT);
-                    let can_clear_depth = image_unbound
-                        .usage
-                        .intersects(image::Usage::TRANSFER_DST | image::Usage::DEPTH_STENCIL_ATTACHMENT)
-                        && props.contains(f::ImageFeature::DEPTH_STENCIL_ATTACHMENT);
+                    let can_clear_depth = image_unbound.usage.intersects(
+                        image::Usage::TRANSFER_DST | image::Usage::DEPTH_STENCIL_ATTACHMENT,
+                    ) && props
+                        .contains(f::ImageFeature::DEPTH_STENCIL_ATTACHMENT);
                     let aspects = image_unbound.format.surface_desc().aspects;
 
                     *image = resource::Image::Bound(resource::ImageBound {
@@ -694,11 +697,12 @@ impl q::CommandQueue<Backend> for CommandQueue {
                             let format = image_unbound.view_format.unwrap();
                             (0..num_layers)
                                 .map(|layer| {
-                                    device.view_image_as_render_target(&device::ViewInfo {
-                                        format,
-                                        layers: layer..layer + 1,
-                                        ..info.clone()
-                                    })
+                                    device
+                                        .view_image_as_render_target(&device::ViewInfo {
+                                            format,
+                                            layers: layer..layer + 1,
+                                            ..info.clone()
+                                        })
                                         .unwrap()
                                 })
                                 .collect()
@@ -709,11 +713,12 @@ impl q::CommandQueue<Backend> for CommandQueue {
                             let format = image_unbound.dsv_format.unwrap();
                             (0..num_layers)
                                 .map(|layer| {
-                                    device.view_image_as_depth_stencil(&device::ViewInfo {
-                                        format,
-                                        layers: layer..layer + 1,
-                                        ..info.clone()
-                                    })
+                                    device
+                                        .view_image_as_depth_stencil(&device::ViewInfo {
+                                            format,
+                                            layers: layer..layer + 1,
+                                            ..info.clone()
+                                        })
                                         .unwrap()
                                 })
                                 .collect()
@@ -724,11 +729,12 @@ impl q::CommandQueue<Backend> for CommandQueue {
                             let format = image_unbound.dsv_format.unwrap();
                             (0..num_layers)
                                 .map(|layer| {
-                                    device.view_image_as_depth_stencil(&device::ViewInfo {
-                                        format,
-                                        layers: layer..layer + 1,
-                                        ..info.clone()
-                                    })
+                                    device
+                                        .view_image_as_depth_stencil(&device::ViewInfo {
+                                            format,
+                                            layers: layer..layer + 1,
+                                            ..info.clone()
+                                        })
                                         .unwrap()
                                 })
                                 .collect()
@@ -741,7 +747,7 @@ impl q::CommandQueue<Backend> for CommandQueue {
             }
         }
         // TODO sparse buffers and opaque images iterated here
-        
+
         if let Some(fence) = fence {
             assert_eq!(winerror::S_OK, self.raw.Signal(fence.raw.as_mut_ptr(), 1));
         }

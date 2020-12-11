@@ -1492,7 +1492,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<native::Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
-        Is: IntoIterator<Item = &'a S>
+        Is: IntoIterator<Item = &'a S>,
     {
         //TODO: avoid heap allocations
         let mut waits = Vec::new();
@@ -1507,68 +1507,82 @@ impl queue::CommandQueue<Backend> for CommandQueue {
             .collect::<Vec<_>>();
 
         let mut buffer_memory_binds = Vec::new();
-        let buffer_binds = info.buffer_memory_binds.into_iter().map(|(buffer, bind_iter)| {
-            let binds_before = buffer_memory_binds.len();
-            buffer_memory_binds.extend(bind_iter.into_iter().map(|bind| {
-                let mut bind_builder = vk::SparseMemoryBind::builder()
-                    .resource_offset(bind.resource_offset as u64)
-                    .size(bind.size as u64);
-                if let Some((memory, memory_offset)) = bind.memory {
-                    bind_builder = bind_builder.memory(memory.borrow().raw);
-                    bind_builder = bind_builder.memory_offset(memory_offset as u64);
-                }
+        let buffer_binds = info
+            .buffer_memory_binds
+            .into_iter()
+            .map(|(buffer, bind_iter)| {
+                let binds_before = buffer_memory_binds.len();
+                buffer_memory_binds.extend(bind_iter.into_iter().map(|bind| {
+                    let mut bind_builder = vk::SparseMemoryBind::builder()
+                        .resource_offset(bind.resource_offset as u64)
+                        .size(bind.size as u64);
+                    if let Some((memory, memory_offset)) = bind.memory {
+                        bind_builder = bind_builder.memory(memory.borrow().raw);
+                        bind_builder = bind_builder.memory_offset(memory_offset as u64);
+                    }
 
-                bind_builder.build()
-            }));
+                    bind_builder.build()
+                }));
 
-            vk::SparseBufferMemoryBindInfo::builder()
-                .buffer(buffer.borrow_mut().raw)
-                .binds(&buffer_memory_binds[binds_before..buffer_memory_binds.len()])
-                .build()
-        }).collect::<Vec<_>>();
+                vk::SparseBufferMemoryBindInfo::builder()
+                    .buffer(buffer.borrow_mut().raw)
+                    .binds(&buffer_memory_binds[binds_before..buffer_memory_binds.len()])
+                    .build()
+            })
+            .collect::<Vec<_>>();
 
         let mut image_opaque_memory_binds = Vec::new();
-        let image_opaque_binds = info.image_opaque_memory_binds.into_iter().map(|(image, bind_iter)| {
-            let binds_before = image_opaque_memory_binds.len();
-            image_opaque_memory_binds.extend(bind_iter.into_iter().map(|bind| {
-                let mut bind_builder = vk::SparseMemoryBind::builder()
-                    .resource_offset(bind.resource_offset as u64)
-                    .size(bind.size as u64);
-                if let Some((memory, memory_offset)) = bind.memory {
-                    bind_builder = bind_builder.memory(memory.borrow().raw);
-                    bind_builder = bind_builder.memory_offset(memory_offset as u64);
-                }
+        let image_opaque_binds = info
+            .image_opaque_memory_binds
+            .into_iter()
+            .map(|(image, bind_iter)| {
+                let binds_before = image_opaque_memory_binds.len();
+                image_opaque_memory_binds.extend(bind_iter.into_iter().map(|bind| {
+                    let mut bind_builder = vk::SparseMemoryBind::builder()
+                        .resource_offset(bind.resource_offset as u64)
+                        .size(bind.size as u64);
+                    if let Some((memory, memory_offset)) = bind.memory {
+                        bind_builder = bind_builder.memory(memory.borrow().raw);
+                        bind_builder = bind_builder.memory_offset(memory_offset as u64);
+                    }
 
-                bind_builder.build()
-            }));
+                    bind_builder.build()
+                }));
 
-            vk::SparseImageOpaqueMemoryBindInfo::builder()
-                .image(image.borrow_mut().raw)
-                .binds(&image_opaque_memory_binds[binds_before..image_opaque_memory_binds.len()])
-                .build()
-        }).collect::<Vec<_>>();
+                vk::SparseImageOpaqueMemoryBindInfo::builder()
+                    .image(image.borrow_mut().raw)
+                    .binds(
+                        &image_opaque_memory_binds[binds_before..image_opaque_memory_binds.len()],
+                    )
+                    .build()
+            })
+            .collect::<Vec<_>>();
 
         let mut image_memory_binds = Vec::new();
-        let image_binds = info.image_memory_binds.into_iter().map(|(image, bind_iter)| {
-            let binds_before = image_memory_binds.len();
-            image_memory_binds.extend(bind_iter.into_iter().map(|bind| {
-                let mut bind_builder = vk::SparseImageMemoryBind::builder()
-                    .subresource(conv::map_subresource(bind.subresource))
-                    .offset(conv::map_offset(bind.offset))
-                    .extent(conv::map_extent(bind.extent));
-                if let Some((memory, memory_offset)) = bind.memory {
-                    bind_builder = bind_builder.memory(memory.borrow().raw);
-                    bind_builder = bind_builder.memory_offset(memory_offset as u64);
-                }
+        let image_binds = info
+            .image_memory_binds
+            .into_iter()
+            .map(|(image, bind_iter)| {
+                let binds_before = image_memory_binds.len();
+                image_memory_binds.extend(bind_iter.into_iter().map(|bind| {
+                    let mut bind_builder = vk::SparseImageMemoryBind::builder()
+                        .subresource(conv::map_subresource(bind.subresource))
+                        .offset(conv::map_offset(bind.offset))
+                        .extent(conv::map_extent(bind.extent));
+                    if let Some((memory, memory_offset)) = bind.memory {
+                        bind_builder = bind_builder.memory(memory.borrow().raw);
+                        bind_builder = bind_builder.memory_offset(memory_offset as u64);
+                    }
 
-                bind_builder.build()
-            }));
+                    bind_builder.build()
+                }));
 
-            vk::SparseImageMemoryBindInfo::builder()
-                .image(image.borrow_mut().raw)
-                .binds(&image_memory_binds[binds_before..image_memory_binds.len()])
-                .build()
-        }).collect::<Vec<_>>();
+                vk::SparseImageMemoryBindInfo::builder()
+                    .image(image.borrow_mut().raw)
+                    .binds(&image_memory_binds[binds_before..image_memory_binds.len()])
+                    .build()
+            })
+            .collect::<Vec<_>>();
 
         let info = vk::BindSparseInfo::builder()
             .wait_semaphores(&waits[..])
@@ -1582,7 +1596,12 @@ impl queue::CommandQueue<Backend> for CommandQueue {
 
         assert_eq!(
             vk::Result::SUCCESS,
-            device.shared.raw.fp_v1_0().queue_bind_sparse(*self.raw, 1, &info as *const _, fence_raw)
+            device.shared.raw.fp_v1_0().queue_bind_sparse(
+                *self.raw,
+                1,
+                &info as *const _,
+                fence_raw
+            )
         );
     }
 

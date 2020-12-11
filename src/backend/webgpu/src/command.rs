@@ -1,4 +1,7 @@
-use std::{borrow::{Borrow, BorrowMut}, ops::Range};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    ops::Range,
+};
 
 use hal::{
     buffer,
@@ -53,7 +56,7 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<<Backend as hal::Backend>::Semaphore>,
         Iw: IntoIterator<Item = (&'a S, pso::PipelineStage)>,
-        Is: IntoIterator<Item = &'a S>
+        Is: IntoIterator<Item = &'a S>,
     {
         todo!()
     }

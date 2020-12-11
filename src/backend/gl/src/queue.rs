@@ -6,7 +6,10 @@ use crate::{
 use glow::HasContext;
 use smallvec::SmallVec;
 
-use std::{borrow::{Borrow, BorrowMut}, mem, slice};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    mem, slice,
+};
 
 // State caching system for command queue.
 //
@@ -1129,7 +1132,7 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<native::Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
-        Is: IntoIterator<Item = &'a S>
+        Is: IntoIterator<Item = &'a S>,
     {
         // TODO could be implemented with https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_sparse_texture.txt
         todo!()

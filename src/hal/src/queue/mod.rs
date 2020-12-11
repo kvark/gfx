@@ -10,12 +10,15 @@ pub mod family;
 
 use crate::{
     device::OutOfMemory,
-    pso,
+    image, pso,
     window::{PresentError, PresentationSurface, Suboptimal},
-    image,
     Backend,
 };
-use std::{any::Any, borrow::{Borrow, BorrowMut}, fmt, iter};
+use std::{
+    any::Any,
+    borrow::{Borrow, BorrowMut},
+    fmt, iter,
+};
 
 pub use self::family::{QueueFamily, QueueFamilyId, QueueGroup};
 

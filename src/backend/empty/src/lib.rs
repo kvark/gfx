@@ -13,7 +13,10 @@ use crate::{
 use hal::{adapter, command, device, format, pass, pool, pso, query, queue, window};
 use log::debug;
 
-use std::{borrow::{Borrow, BorrowMut}, ops::Range};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    ops::Range,
+};
 
 mod buffer;
 mod descriptor;
@@ -191,7 +194,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<()>,
         Iw: IntoIterator<Item = &'a S>,
-        Is: IntoIterator<Item = &'a S>
+        Is: IntoIterator<Item = &'a S>,
     {
     }
 
