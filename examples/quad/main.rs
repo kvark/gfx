@@ -425,12 +425,12 @@ where
                         signal_semaphores: std::iter::empty::<&B::Semaphore>(),
                         buffer_memory_binds: std::iter::empty::<(
                             &mut B::Buffer,
-                            std::iter::Empty<hal::queue::SparseMemoryBind<&B::Memory>>,
+                            std::iter::Empty<hal::memory::SparseBind<&B::Memory>>,
                         )>(),
                         image_opaque_memory_binds: std::iter::empty(),
                         image_memory_binds: std::iter::once((
                             &mut *image_logo,
-                            std::iter::once(hal::queue::SparseImageMemoryBind {
+                            std::iter::once(hal::memory::SparseImageBind {
                                 subresource: &hal::image::Subresource {
                                     aspects: hal::format::Aspects::COLOR,
                                     level: 0,

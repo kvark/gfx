@@ -128,3 +128,39 @@ impl Segment {
         size: None,
     };
 }
+
+/// Defines a single memory bind region.
+///
+/// This is used in the [`bind_sparse`][CommandQueue::bind_sparse] method to define a physical
+/// store region for a buffer.
+#[derive(Debug)]
+pub struct SparseBind<M> {
+    /// Offset into the (virtual) resource.
+    pub resource_offset: u64,
+    /// Size of the memory region to be bound.
+    pub size: u64,
+    /// Memory that the physical store is bound to, and the offset into the resource of the binding.
+    ///
+    /// Using `None` will unbind this range. Reading or writing to an unbound range is undefined
+    /// behaviour in some older hardware.
+    pub memory: Option<(M, u64)>,
+}
+
+/// Defines a single image memory bind region.
+///
+/// This is used in the [`bind_sparse`][CommandQueue::bind_sparse] method to define a physical
+/// store region for a buffer.
+#[derive(Debug)]
+pub struct SparseImageBind<'a, M> {
+    /// Image aspect and region of interest in the image.
+    pub subresource: &'a image::Subresource,
+    /// Coordinates of the first texel in the (virtual) image subresource to bind.
+    pub offset: image::Offset,
+    /// Extent of the (virtual) image subresource region to be bound.
+    pub extent: image::Extent,
+    /// Memory that the physical store is bound to, and the offset into the resource of the binding.
+    ///
+    /// Using `None` will unbind this range. Reading or writing to an unbound range is undefined
+    /// behaviour in some older hardware.
+    pub memory: Option<(M, u64)>,
+}

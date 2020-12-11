@@ -10,7 +10,7 @@ pub mod family;
 
 use crate::{
     device::OutOfMemory,
-    image, pso,
+    pso,
     window::{PresentError, PresentationSurface, Suboptimal},
     Backend,
 };
@@ -21,6 +21,7 @@ use std::{
 };
 
 pub use self::family::{QueueFamily, QueueFamilyId, QueueGroup};
+use crate::memory::{SparseBind, SparseImageBind};
 
 /// The type of the queue, an enum encompassing `queue::Capability`
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -91,42 +92,6 @@ pub struct BindSparseInfo<Iw, Is, Ib, Io, Ii> {
     pub image_memory_binds: Ii,
 }
 
-/// Defines a single memory bind region.
-///
-/// This is used in the [`bind_sparse`][CommandQueue::bind_sparse] method to define a physical
-/// store region for a buffer.
-#[derive(Debug)]
-pub struct SparseMemoryBind<M> {
-    /// Offset into the (virtual) resource.
-    pub resource_offset: u64,
-    /// Size of the memory region to be bound.
-    pub size: u64,
-    /// Memory that the physical store is bound to, and the offset into the resource of the binding.
-    ///
-    /// Using `None` will unbind this range. Reading or writing to an unbound range is undefined
-    /// behaviour in some older hardware.
-    pub memory: Option<(M, usize)>,
-}
-
-/// Defines a single image memory bind region.
-///
-/// This is used in the [`bind_sparse`][CommandQueue::bind_sparse] method to define a physical
-/// store region for a buffer.
-#[derive(Debug)]
-pub struct SparseImageMemoryBind<'a, M> {
-    /// Image aspect and region of interest in the image.
-    pub subresource: &'a image::Subresource,
-    /// Coordinates of the first texel in the (virtual) image subresource to bind.
-    pub offset: image::Offset,
-    /// Extent of the (virtual) image subresource region to be bound.
-    pub extent: image::Extent,
-    /// Memory that the physical store is bound to, and the offset into the resource of the binding.
-    ///
-    /// Using `None` will unbind this range. Reading or writing to an unbound range is undefined
-    /// behaviour in some older hardware.
-    pub memory: Option<(M, u64)>,
-}
-
 /// Abstraction for an internal GPU execution engine.
 ///
 /// Commands are executed on the the device by submitting
@@ -183,10 +148,10 @@ pub trait CommandQueue<B: Backend>: fmt::Debug + Any + Send + Sync {
     ) where
         Bf: 'a + BorrowMut<B::Buffer>,
         M: 'a + Borrow<B::Memory>,
-        Ibi: IntoIterator<Item = SparseMemoryBind<&'a M>>,
+        Ibi: IntoIterator<Item = SparseBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
         I: 'a + BorrowMut<B::Image>,
-        Iii: IntoIterator<Item = SparseImageMemoryBind<'a, &'a M>>,
+        Iii: IntoIterator<Item = SparseImageBind<'a, &'a M>>,
         Io: IntoIterator<Item = (&'a mut I, Ibi)>,
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<B::Semaphore>,

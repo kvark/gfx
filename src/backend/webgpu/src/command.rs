@@ -48,10 +48,10 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
     ) where
         Bf: 'a + BorrowMut<<Backend as hal::Backend>::Buffer>,
         M: 'a + Borrow<<Backend as hal::Backend>::Memory>,
-        Ibi: IntoIterator<Item = queue::SparseMemoryBind<&'a M>>,
+        Ibi: IntoIterator<Item = hal::memory::SparseBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
         I: 'a + BorrowMut<<Backend as hal::Backend>::Image>,
-        Iii: IntoIterator<Item = queue::SparseImageMemoryBind<'a, &'a M>>,
+        Iii: IntoIterator<Item = hal::memory::SparseImageBind<'a, &'a M>>,
         Io: IntoIterator<Item = (&'a mut I, Ibi)>,
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<<Backend as hal::Backend>::Semaphore>,
