@@ -431,7 +431,7 @@ where
                         image_memory_binds: std::iter::once((
                             &mut *image_logo,
                             std::iter::once(hal::memory::SparseImageBind {
-                                subresource: &hal::image::Subresource {
+                                subresource: hal::image::Subresource {
                                     aspects: hal::format::Aspects::COLOR,
                                     level: 0,
                                     layer: 0,

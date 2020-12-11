@@ -1487,7 +1487,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
         Ibi: IntoIterator<Item = memory::SparseBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
         I: 'a + BorrowMut<native::Image>,
-        Iii: IntoIterator<Item = memory::SparseImageBind<'a, &'a M>>,
+        Iii: IntoIterator<Item = memory::SparseImageBind<&'a M>>,
         Io: IntoIterator<Item = (&'a mut I, Ibi)>,
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<native::Semaphore>,
@@ -1566,7 +1566,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
                 let binds_before = image_memory_binds.len();
                 image_memory_binds.extend(bind_iter.into_iter().map(|bind| {
                     let mut bind_builder = vk::SparseImageMemoryBind::builder()
-                        .subresource(conv::map_subresource(bind.subresource))
+                        .subresource(conv::map_subresource(&bind.subresource))
                         .offset(conv::map_offset(bind.offset))
                         .extent(conv::map_extent(bind.extent));
                     if let Some((memory, memory_offset)) = bind.memory {

@@ -151,12 +151,17 @@ pub trait CommandQueue<B: Backend>: fmt::Debug + Any + Send + Sync {
         Ibi: IntoIterator<Item = SparseBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
         I: 'a + BorrowMut<B::Image>,
-        Iii: IntoIterator<Item = SparseImageBind<'a, &'a M>>,
+        Iii: IntoIterator<Item = SparseImageBind<&'a M>>,
         Io: IntoIterator<Item = (&'a mut I, Ibi)>,
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<B::Semaphore>,
         Iw: IntoIterator<Item = &'a S>,
-        Is: IntoIterator<Item = &'a S>;
+        Is: IntoIterator<Item = &'a S>,
+        Ibi::IntoIter: ExactSizeIterator,
+        Ib::IntoIter: ExactSizeIterator,
+        Iii::IntoIter: ExactSizeIterator,
+        Io::IntoIter: ExactSizeIterator,
+        Ii::IntoIter: ExactSizeIterator;
 
     /// Simplified version of `submit` that doesn't expect any semaphores.
     unsafe fn submit_without_semaphores<'a, T, Ic>(

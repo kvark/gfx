@@ -1127,7 +1127,7 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
         Ibi: IntoIterator<Item = gfx_hal::memory::SparseMemoryBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
         I: 'a + BorrowMut<native::Image>,
-        Iii: IntoIterator<Item = gfx_hal::memory::SparseImageMemoryBind<'a, &'a M>>,
+        Iii: IntoIterator<Item = gfx_hal::memory::SparseImageMemoryBind<&'a M>>,
         Io: IntoIterator<Item = (&'a mut I, Ibi)>,
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<native::Semaphore>,

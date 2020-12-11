@@ -519,7 +519,7 @@ impl q::CommandQueue<Backend> for CommandQueue {
         Ibi: IntoIterator<Item = memory::SparseBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
         I: 'a + BorrowMut<resource::Image>,
-        Iii: IntoIterator<Item = memory::SparseImageBind<'a, &'a M>>,
+        Iii: IntoIterator<Item = memory::SparseImageBind<&'a M>>,
         Io: IntoIterator<Item = (&'a mut I, Ibi)>,
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<resource::Semaphore>,
@@ -542,7 +542,9 @@ impl q::CommandQueue<Backend> for CommandQueue {
             };
             let block_size = match image_kind {
                 image::Kind::D1(_, _) => unimplemented!(),
-                image::Kind::D2(_, _, _, samples) => image::get_tile_size(image::TileKind::Flat(samples), bits),
+                image::Kind::D2(_, _, _, samples) => {
+                    image::get_tile_size(image::TileKind::Flat(samples), bits)
+                }
                 image::Kind::D3(_, _, _) => image::get_tile_size(image::TileKind::Volume, bits),
             };
 

@@ -1165,7 +1165,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
         Ibi: IntoIterator<Item = memory::SparseBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
         I: 'a + BorrowMut<Image>,
-        Iii: IntoIterator<Item = memory::SparseImageBind<'a, &'a M>>,
+        Iii: IntoIterator<Item = memory::SparseImageBind<&'a M>>,
         Io: IntoIterator<Item = (&'a mut I, Ibi)>,
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
         S: 'a + Borrow<Semaphore>,
