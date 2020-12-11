@@ -707,37 +707,41 @@ pub struct SubresourceFootprint {
     pub depth_pitch: RawOffset,
 }
 
+pub enum TileKind {
+    Volume,
+    Flat(NumSamples),
+}
+
 // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/html/vkspec.html#sparsememory-standard-shapes
 // https://docs.microsoft.com/en-us/windows/win32/direct3d11/texture2d-and-texture2darray-subresource-tiling
-/// Block size.
-pub fn get_block_size(volume: bool, texel_bits: u16, samples: u8) -> (u16, u16, u16) {
-    let sizes = if volume {
-        match texel_bits {
-            8 => (64, 32, 32),
-            16 => (32, 32, 32),
-            32 => (32, 32, 16),
-            64 => (32, 16, 16),
-            128 => (16, 16, 16),
-            _ => unimplemented!(),
+/// Tile or block size for sparse binding
+pub fn get_tile_size(volume: TileKind, texel_bits: u16) -> (u16, u16, u16) {
+    match volume {
+        TileKind::Flat(samples) => {
+            let sizes = match texel_bits {
+                8 => (64, 32, 32),
+                16 => (32, 32, 32),
+                32 => (32, 32, 16),
+                64 => (32, 16, 16),
+                128 => (16, 16, 16),
+                _ => unimplemented!(),
+            };
+            match samples {
+                1 => sizes,
+                2 => (sizes.0 / 2, sizes.1, 1),
+                4 => (sizes.0 / 2, sizes.1 / 2, 1),
+                8 => (sizes.0 / 4, sizes.1 / 2, 1),
+                16 => (sizes.0 / 4, sizes.1 / 4, 1),
+                _ => unimplemented!(),
+            }
         }
-    } else {
-        match texel_bits {
+        TileKind::Volume => match texel_bits {
             8 => (256, 256, 1),
             16 => (256, 128, 1),
             32 => (128, 128, 1),
             64 => (128, 64, 1),
             128 => (64, 64, 1),
             _ => unimplemented!(),
-        }
-    };
-    // Can't have 3D textures with multi sampling
-    assert!(!volume || samples == 1);
-    match samples {
-        1 => sizes,
-        2 => (sizes.0 / 2, sizes.1, 1),
-        4 => (sizes.0 / 2, sizes.1 / 2, 1),
-        8 => (sizes.0 / 4, sizes.1 / 2, 1),
-        16 => (sizes.0 / 4, sizes.1 / 4, 1),
-        _ => unimplemented!(),
+        },
     }
 }

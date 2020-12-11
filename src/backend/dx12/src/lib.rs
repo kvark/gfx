@@ -596,12 +596,11 @@ impl q::CommandQueue<Backend> for CommandQueue {
                     }
                     range_flags.push(d3d12::D3D12_TILE_RANGE_FLAG_NONE);
                     heap_range_start_offsets.push(memory_offset as u32);
-                    range_tile_counts.push(number_tiles);
                 } else {
                     range_flags.push(d3d12::D3D12_TILE_RANGE_FLAG_NULL);
                     heap_range_start_offsets.push(0);
-                    range_tile_counts.push(number_tiles);
                 }
+                range_tile_counts.push(number_tiles);
             }
 
             match image {
@@ -645,104 +644,7 @@ impl q::CommandQueue<Backend> for CommandQueue {
                         d3d12::D3D12_TILE_MAPPING_FLAG_NONE,
                     );
 
-                    //TODO: the clear_Xv is incomplete. We should support clearing images created without XXX_ATTACHMENT usage.
-                    // for this, we need to check the format and force the `RENDER_TARGET` flag behind the user's back
-                    // if the format supports being rendered into, allowing us to create clear_Xv
-                    let num_layers = image_unbound.kind.num_layers();
-                    let info = device::ViewInfo {
-                        resource,
-                        kind: image_unbound.kind,
-                        caps: image::ViewCapabilities::empty(),
-                        view_kind: match image_unbound.kind {
-                            image::Kind::D1(..) => image::ViewKind::D1Array,
-                            image::Kind::D2(..) => image::ViewKind::D2Array,
-                            image::Kind::D3(..) => image::ViewKind::D3,
-                        },
-                        format: image_unbound.desc.Format,
-                        component_mapping: device::IDENTITY_MAPPING,
-                        levels: 0..1,
-                        layers: 0..0,
-                    };
-
-                    let format_properties = device
-                        .format_properties
-                        .resolve(image_unbound.format as usize)
-                        .properties;
-                    let props = match image_unbound.tiling {
-                        image::Tiling::Optimal => format_properties.optimal_tiling,
-                        image::Tiling::Linear => format_properties.linear_tiling,
-                    };
-                    let can_clear_color = image_unbound
-                        .usage
-                        .intersects(image::Usage::TRANSFER_DST | image::Usage::COLOR_ATTACHMENT)
-                        && props.contains(f::ImageFeature::COLOR_ATTACHMENT);
-                    let can_clear_depth = image_unbound.usage.intersects(
-                        image::Usage::TRANSFER_DST | image::Usage::DEPTH_STENCIL_ATTACHMENT,
-                    ) && props
-                        .contains(f::ImageFeature::DEPTH_STENCIL_ATTACHMENT);
-                    let aspects = image_unbound.format.surface_desc().aspects;
-
-                    *image = resource::Image::Bound(resource::ImageBound {
-                        resource,
-                        // There is no set heap I can use here
-                        place: resource::Place::Swapchain {},
-                        surface_type: image_unbound.format.base_format().0,
-                        kind: image_unbound.kind,
-                        mip_levels: image_unbound.mip_levels,
-                        usage: image_unbound.usage,
-                        default_view_format: image_unbound.view_format,
-                        view_caps: image_unbound.view_caps,
-                        descriptor: image_unbound.desc,
-                        clear_cv: if aspects.contains(f::Aspects::COLOR) && can_clear_color {
-                            let format = image_unbound.view_format.unwrap();
-                            (0..num_layers)
-                                .map(|layer| {
-                                    device
-                                        .view_image_as_render_target(&device::ViewInfo {
-                                            format,
-                                            layers: layer..layer + 1,
-                                            ..info.clone()
-                                        })
-                                        .unwrap()
-                                })
-                                .collect()
-                        } else {
-                            Vec::new()
-                        },
-                        clear_dv: if aspects.contains(f::Aspects::DEPTH) && can_clear_depth {
-                            let format = image_unbound.dsv_format.unwrap();
-                            (0..num_layers)
-                                .map(|layer| {
-                                    device
-                                        .view_image_as_depth_stencil(&device::ViewInfo {
-                                            format,
-                                            layers: layer..layer + 1,
-                                            ..info.clone()
-                                        })
-                                        .unwrap()
-                                })
-                                .collect()
-                        } else {
-                            Vec::new()
-                        },
-                        clear_sv: if aspects.contains(f::Aspects::STENCIL) && can_clear_depth {
-                            let format = image_unbound.dsv_format.unwrap();
-                            (0..num_layers)
-                                .map(|layer| {
-                                    device
-                                        .view_image_as_depth_stencil(&device::ViewInfo {
-                                            format,
-                                            layers: layer..layer + 1,
-                                            ..info.clone()
-                                        })
-                                        .unwrap()
-                                })
-                                .collect()
-                        } else {
-                            Vec::new()
-                        },
-                        requirements: image_unbound.requirements,
-                    });
+                    device.bind_image_resource(resource, image, resource::Place::Swapchain {});
                 }
             }
         }

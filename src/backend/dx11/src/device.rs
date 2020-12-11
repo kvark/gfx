@@ -1546,17 +1546,18 @@ impl device::Device<Backend> for Device {
                     Usage: usage,
                     BindFlags: bind,
                     CPUAccessFlags: cpu,
-                    MiscFlags: if image.view_caps.contains(image::ViewCapabilities::KIND_CUBE) {
-                        d3d11::D3D11_RESOURCE_MISC_TEXTURECUBE
-                    } else {
-                        0
-                    } | if image
-                        .view_caps
-                        .contains(image::ViewCapabilities::SPARSE_BINDING)
-                    {
-                        d3d11::D3D11_RESOURCE_MISC_TILED
-                    } else {
-                        0
+                    MiscFlags: {
+                        let mut flags = 0;
+                        if image.view_caps.contains(image::ViewCapabilities::KIND_CUBE) {
+                            flags |= d3d11::D3D11_RESOURCE_MISC_TEXTURECUBE;
+                        }
+                        if image
+                            .view_caps
+                            .contains(image::ViewCapabilities::SPARSE_BINDING)
+                        {
+                            flags |= d3d11::D3D11_RESOURCE_MISC_TILED;
+                        }
+                        flags
                     },
                 };
 

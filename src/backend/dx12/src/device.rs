@@ -1155,6 +1155,109 @@ impl Device {
             acquired_count: 0,
         }
     }
+
+    pub(crate) fn bind_image_resource(
+        &self,
+        resource: native::WeakPtr<d3d12::ID3D12Resource>,
+        image: &mut r::Image,
+        place: r::Place,
+    ) {
+        let image_unbound = image.expect_unbound();
+        let num_layers = image_unbound.kind.num_layers();
+
+        //TODO: the clear_Xv is incomplete. We should support clearing images created without XXX_ATTACHMENT usage.
+        // for this, we need to check the format and force the `RENDER_TARGET` flag behind the user's back
+        // if the format supports being rendered into, allowing us to create clear_Xv
+        let info = ViewInfo {
+            resource,
+            kind: image_unbound.kind,
+            caps: image::ViewCapabilities::empty(),
+            view_kind: match image_unbound.kind {
+                image::Kind::D1(..) => image::ViewKind::D1Array,
+                image::Kind::D2(..) => image::ViewKind::D2Array,
+                image::Kind::D3(..) => image::ViewKind::D3,
+            },
+            format: image_unbound.desc.Format,
+            component_mapping: IDENTITY_MAPPING,
+            levels: 0..1,
+            layers: 0..0,
+        };
+        let format_properties = self
+            .format_properties
+            .resolve(image_unbound.format as usize)
+            .properties;
+        let props = match image_unbound.tiling {
+            image::Tiling::Optimal => format_properties.optimal_tiling,
+            image::Tiling::Linear => format_properties.linear_tiling,
+        };
+        let can_clear_color = image_unbound
+            .usage
+            .intersects(image::Usage::TRANSFER_DST | image::Usage::COLOR_ATTACHMENT)
+            && props.contains(format::ImageFeature::COLOR_ATTACHMENT);
+        let can_clear_depth = image_unbound
+            .usage
+            .intersects(image::Usage::TRANSFER_DST | image::Usage::DEPTH_STENCIL_ATTACHMENT)
+            && props.contains(format::ImageFeature::DEPTH_STENCIL_ATTACHMENT);
+        let aspects = image_unbound.format.surface_desc().aspects;
+
+        *image = r::Image::Bound(r::ImageBound {
+            resource,
+            place,
+            surface_type: image_unbound.format.base_format().0,
+            kind: image_unbound.kind,
+            mip_levels: image_unbound.mip_levels,
+            usage: image_unbound.usage,
+            default_view_format: image_unbound.view_format,
+            view_caps: image_unbound.view_caps,
+            descriptor: image_unbound.desc,
+            clear_cv: if aspects.contains(Aspects::COLOR) && can_clear_color {
+                let format = image_unbound.view_format.unwrap();
+                (0..num_layers)
+                    .map(|layer| {
+                        self.view_image_as_render_target(&ViewInfo {
+                            format,
+                            layers: layer..layer + 1,
+                            ..info.clone()
+                        })
+                        .unwrap()
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            clear_dv: if aspects.contains(Aspects::DEPTH) && can_clear_depth {
+                let format = image_unbound.dsv_format.unwrap();
+                (0..num_layers)
+                    .map(|layer| {
+                        self.view_image_as_depth_stencil(&ViewInfo {
+                            format,
+                            layers: layer..layer + 1,
+                            ..info.clone()
+                        })
+                        .unwrap()
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            clear_sv: if aspects.contains(Aspects::STENCIL) && can_clear_depth {
+                let format = image_unbound.dsv_format.unwrap();
+                (0..num_layers)
+                    .map(|layer| {
+                        self.view_image_as_depth_stencil(&ViewInfo {
+                            format,
+                            layers: layer..layer + 1,
+                            ..info.clone()
+                        })
+                        .unwrap()
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            requirements: image_unbound.requirements,
+        });
+    }
 }
 
 impl d::Device<B> for Device {
@@ -2617,8 +2720,6 @@ impl d::Device<B> for Device {
         offset: u64,
         image: &mut r::Image,
     ) -> Result<(), d::BindError> {
-        use self::image::Usage;
-
         let image_unbound = image.expect_unbound();
         if image_unbound.requirements.type_mask & (1 << memory.type_id) == 0 {
             error!(
@@ -2632,7 +2733,6 @@ impl d::Device<B> for Device {
         }
 
         let mut resource = native::Resource::null();
-        let num_layers = image_unbound.kind.num_layers();
 
         assert_eq!(
             winerror::S_OK,
@@ -2651,102 +2751,14 @@ impl d::Device<B> for Device {
             resource.SetName(name.as_ptr());
         }
 
-        let info = ViewInfo {
+        self.bind_image_resource(
             resource,
-            kind: image_unbound.kind,
-            caps: image::ViewCapabilities::empty(),
-            view_kind: match image_unbound.kind {
-                image::Kind::D1(..) => image::ViewKind::D1Array,
-                image::Kind::D2(..) => image::ViewKind::D2Array,
-                image::Kind::D3(..) => image::ViewKind::D3,
-            },
-            format: image_unbound.desc.Format,
-            component_mapping: IDENTITY_MAPPING,
-            levels: 0..1,
-            layers: 0..0,
-        };
-
-        //TODO: the clear_Xv is incomplete. We should support clearing images created without XXX_ATTACHMENT usage.
-        // for this, we need to check the format and force the `RENDER_TARGET` flag behind the user's back
-        // if the format supports being rendered into, allowing us to create clear_Xv
-        let format_properties = self
-            .format_properties
-            .resolve(image_unbound.format as usize)
-            .properties;
-        let props = match image_unbound.tiling {
-            image::Tiling::Optimal => format_properties.optimal_tiling,
-            image::Tiling::Linear => format_properties.linear_tiling,
-        };
-        let can_clear_color = image_unbound
-            .usage
-            .intersects(Usage::TRANSFER_DST | Usage::COLOR_ATTACHMENT)
-            && props.contains(format::ImageFeature::COLOR_ATTACHMENT);
-        let can_clear_depth = image_unbound
-            .usage
-            .intersects(Usage::TRANSFER_DST | Usage::DEPTH_STENCIL_ATTACHMENT)
-            && props.contains(format::ImageFeature::DEPTH_STENCIL_ATTACHMENT);
-        let aspects = image_unbound.format.surface_desc().aspects;
-
-        *image = r::Image::Bound(r::ImageBound {
-            resource: resource,
-            place: r::Place::Heap {
+            image,
+            r::Place::Heap {
                 raw: memory.heap.clone(),
                 offset,
             },
-            surface_type: image_unbound.format.base_format().0,
-            kind: image_unbound.kind,
-            mip_levels: image_unbound.mip_levels,
-            usage: image_unbound.usage,
-            default_view_format: image_unbound.view_format,
-            view_caps: image_unbound.view_caps,
-            descriptor: image_unbound.desc,
-            clear_cv: if aspects.contains(Aspects::COLOR) && can_clear_color {
-                let format = image_unbound.view_format.unwrap();
-                (0..num_layers)
-                    .map(|layer| {
-                        self.view_image_as_render_target(&ViewInfo {
-                            format,
-                            layers: layer..layer + 1,
-                            ..info.clone()
-                        })
-                        .unwrap()
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            },
-            clear_dv: if aspects.contains(Aspects::DEPTH) && can_clear_depth {
-                let format = image_unbound.dsv_format.unwrap();
-                (0..num_layers)
-                    .map(|layer| {
-                        self.view_image_as_depth_stencil(&ViewInfo {
-                            format,
-                            layers: layer..layer + 1,
-                            ..info.clone()
-                        })
-                        .unwrap()
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            },
-            clear_sv: if aspects.contains(Aspects::STENCIL) && can_clear_depth {
-                let format = image_unbound.dsv_format.unwrap();
-                (0..num_layers)
-                    .map(|layer| {
-                        self.view_image_as_depth_stencil(&ViewInfo {
-                            format,
-                            layers: layer..layer + 1,
-                            ..info.clone()
-                        })
-                        .unwrap()
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            },
-            requirements: image_unbound.requirements,
-        });
+        );
 
         Ok(())
     }

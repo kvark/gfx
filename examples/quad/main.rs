@@ -436,7 +436,7 @@ where
                                     level: 0,
                                     layer: 0,
                                 },
-                                offset: hal::image::Offset { x: 0, y: 0, z: 0 },
+                                offset: hal::image::Offset::ZERO,
                                 extent: hal::image::Extent {
                                     width,
                                     height,

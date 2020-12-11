@@ -1526,7 +1526,7 @@ impl queue::CommandQueue<Backend> for CommandQueue {
 
                 vk::SparseBufferMemoryBindInfo::builder()
                     .buffer(buffer.borrow_mut().raw)
-                    .binds(&buffer_memory_binds[binds_before..buffer_memory_binds.len()])
+                    .binds(&buffer_memory_binds[binds_before..])
                     .build()
             })
             .collect::<Vec<_>>();
@@ -1585,23 +1585,23 @@ impl queue::CommandQueue<Backend> for CommandQueue {
             .collect::<Vec<_>>();
 
         let info = vk::BindSparseInfo::builder()
-            .wait_semaphores(&waits[..])
-            .signal_semaphores(&signals[..])
-            .buffer_binds(&buffer_binds[..])
-            .image_opaque_binds(&image_opaque_binds[..])
-            .image_binds(&image_binds[..]);
+            .wait_semaphores(&waits)
+            .signal_semaphores(&signals)
+            .buffer_binds(&buffer_binds)
+            .image_opaque_binds(&image_opaque_binds)
+            .image_binds(&image_binds);
 
         let info = info.build();
         let fence_raw = fence.map(|fence| fence.0).unwrap_or(vk::Fence::null());
 
+        // TODO temporary hack as method is not yet exposed, https://github.com/MaikKlein/ash/issues/342
         assert_eq!(
             vk::Result::SUCCESS,
-            device.shared.raw.fp_v1_0().queue_bind_sparse(
-                *self.raw,
-                1,
-                &info as *const _,
-                fence_raw
-            )
+            device
+                .shared
+                .raw
+                .fp_v1_0()
+                .queue_bind_sparse(*self.raw, 1, &info, fence_raw)
         );
     }
 
