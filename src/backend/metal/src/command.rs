@@ -33,7 +33,7 @@ use parking_lot::Mutex;
 #[cfg(feature = "dispatch")]
 use std::fmt;
 use std::{
-    borrow::{Borrow, BorrowMut},
+    borrow::Borrow,
     cell::RefCell,
     iter, mem,
     ops::{Deref, Range},
@@ -2413,11 +2413,11 @@ impl hal::queue::CommandQueue<Backend> for CommandQueue {
         _device: &crate::Device,
         _fence: Option<&native::Fence>,
     ) where
-        Bf: 'a + BorrowMut<native::Buffer>,
+        Bf: 'a + std::borrow::BorrowMut<native::Buffer>,
         M: 'a + Borrow<native::Memory>,
         Ibi: IntoIterator<Item = hal::memory::SparseBind<&'a M>>,
         Ib: IntoIterator<Item = (&'a mut Bf, Ibi)>,
-        I: 'a + BorrowMut<native::Image>,
+        I: 'a + std::borrow::BorrowMut<native::Image>,
         Iii: IntoIterator<Item = hal::memory::SparseImageBind<&'a M>>,
         Io: IntoIterator<Item = (&'a mut I, Ibi)>,
         Ii: IntoIterator<Item = (&'a mut I, Iii)>,
