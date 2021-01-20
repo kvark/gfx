@@ -287,10 +287,13 @@ impl<B: hal::Backend> Scene<B> {
             match *resource {
                 raw::Resource::Buffer {
                     size,
-                    usage,
+                    mut usage,
                     ref data,
                 } => {
                     // allocate memory
+                    if !data.is_empty() {
+                        usage |= b::Usage::TRANSFER_DST;
+                    }
                     let mut buffer = unsafe { device.create_buffer(size as _, usage) }.unwrap();
                     let requirements = unsafe { device.get_buffer_requirements(&buffer) };
                     let memory_type = memory_types
@@ -409,11 +412,14 @@ impl<B: hal::Backend> Scene<B> {
                     kind,
                     num_levels,
                     format,
-                    usage,
+                    mut usage,
                     view_caps,
                     ref data,
                 } => {
                     // allocate memory
+                    if !data.is_empty() {
+                        usage |= i::Usage::TRANSFER_DST;
+                    }
                     let mut image = unsafe {
                         device.create_image(
                             kind,

@@ -1423,7 +1423,35 @@ impl d::Device<B> for Device {
         let channel = format.base_format().1;
 
         let mut pixel_count: u64 = 0;
-        let image = if num_levels > 1 || usage.intersects(i::Usage::STORAGE | i::Usage::SAMPLED) {
+        let renderbuffer_usage = i::Usage::COLOR_ATTACHMENT
+            | i::Usage::DEPTH_STENCIL_ATTACHMENT
+            | i::Usage::TRANSFER_SRC;
+        //Note: we could find a way to support TRANSFER_DST via rendering, but why?
+        let image = if num_levels == 1 && renderbuffer_usage.contains(usage) {
+            let name = gl.create_renderbuffer().unwrap();
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(name));
+            match kind {
+                i::Kind::D2(w, h, 1, 1) => {
+                    gl.renderbuffer_storage(glow::RENDERBUFFER, desc.tex_internal, w as _, h as _);
+                    pixel_count += (w * h) as u64;
+                }
+                i::Kind::D2(w, h, 1, samples) => {
+                    gl.renderbuffer_storage_multisample(
+                        glow::RENDERBUFFER,
+                        samples as _,
+                        desc.tex_internal,
+                        w as _,
+                        h as _,
+                    );
+                    pixel_count += (w * h) as u64 * samples as u64; // Not sure though
+                }
+                _ => unimplemented!(),
+            };
+            n::ImageType::Renderbuffer {
+                raw: name,
+                format: desc.tex_external,
+            }
+        } else {
             let name = gl.create_texture().unwrap();
             let target = match kind {
                 i::Kind::D2(w, h, 1, 1) => {
@@ -1513,30 +1541,6 @@ impl d::Device<B> for Device {
                 pixel_type: desc.data_type,
                 layer_count: kind.num_layers(),
                 level_count: num_levels,
-            }
-        } else {
-            let name = gl.create_renderbuffer().unwrap();
-            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(name));
-            match kind {
-                i::Kind::D2(w, h, 1, 1) => {
-                    gl.renderbuffer_storage(glow::RENDERBUFFER, desc.tex_internal, w as _, h as _);
-                    pixel_count += (w * h) as u64;
-                }
-                i::Kind::D2(w, h, 1, samples) => {
-                    gl.renderbuffer_storage_multisample(
-                        glow::RENDERBUFFER,
-                        samples as _,
-                        desc.tex_internal,
-                        w as _,
-                        h as _,
-                    );
-                    pixel_count += (w * h) as u64 * samples as u64; // Not sure though
-                }
-                _ => unimplemented!(),
-            };
-            n::ImageType::Renderbuffer {
-                raw: name,
-                format: desc.tex_external,
             }
         };
 

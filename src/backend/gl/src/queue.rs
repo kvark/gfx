@@ -58,6 +58,7 @@ pub struct CommandQueue {
     features: hal::Features,
     vao: Option<native::VertexArray>,
     state: State,
+    copy_framebuffer: native::RawFramebuffer,
     fill_buffer: native::RawBuffer,
     fill_data: Box<[u32]>,
 }
@@ -88,6 +89,7 @@ impl CommandQueue {
             features,
             vao,
             state: State::new(),
+            copy_framebuffer: unsafe { gl.create_framebuffer().unwrap() },
             fill_buffer,
             fill_data: vec![0; FILL_DATA_WORDS].into_boxed_slice(),
         }
@@ -679,7 +681,7 @@ impl CommandQueue {
                 gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER, None);
             },
             com::Command::CopyBufferToRenderbuffer(..) => {
-                error!("CopyBufferToRenderbuffer is not implemented");
+                panic!("CopyBufferToRenderbuffer is not implemented");
             }
             com::Command::CopyTextureToBuffer {
                 src_texture,
@@ -716,7 +718,7 @@ impl CommandQueue {
                     //TODO: use FBO
                     error!("CopyTextureToBuffer is not implemented on GLES");
                 }
-            },
+            }
             com::Command::CopyRenderbufferToBuffer(..) => {
                 //TODO: use FBO
                 error!("CopyRenderbufferToBuffer is not implemented");
