@@ -2429,17 +2429,16 @@ impl hal::queue::Queue<Backend> for Queue {
             self.record_empty(command_buffer);
 
             // https://developer.apple.com/documentation/quartzcore/cametallayer/1478157-presentswithtransaction?language=objc
-            if image.present_with_transaction {
-                let block = ConcreteBlock::new(move |_cb: *mut ()| {
-                    image.drawable.present();
-                })
-                .copy();
-                let () = msg_send![command_buffer, addScheduledHandler: block.deref() as *const _];
-            } else {
+            if !image.present_with_transaction {
                 command_buffer.present_drawable(&image.drawable);
             }
 
             command_buffer.commit();
+
+            if image.present_with_transaction {
+                let () = msg_send![command_buffer, waitUntilScheduled];
+                image.drawable.present();
+            }
         });
 
         Ok(None)
